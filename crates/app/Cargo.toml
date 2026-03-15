@@ -1,0 +1,19 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+default-run = "lgx"
+autobins = false
+
+[[bin]]
+name = "lgx"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = true }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+slint = "1.5"
+ui = { path = "../ui" }
+lgx-engine = { path = "../engine" }
+lgx-protocol = { path = "../protocol" }

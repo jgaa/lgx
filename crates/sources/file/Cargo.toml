@@ -1,0 +1,10 @@
+[package]
+name = "lgx-source-file"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+memmap2 = "0.9"
+lgx-parsing = { path = "../../parsing" }
+lgx-core = { path = "../../core" }
+lgx-source-api = { path = "../../source-api" }

@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/app",
+    "crates/ui",
+    "crates/core",
+    "crates/protocol",
+    "crates/parsing",
+    "crates/source-api",
+    "crates/sources/file",
+    "crates/sources/docker",
+    "crates/engine",
+    "crates/logsim",
+]
+default-members = ["crates/app"]

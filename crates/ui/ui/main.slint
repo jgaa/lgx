@@ -1,0 +1,707 @@
+import { VerticalBox, HorizontalBox, LineEdit, Button, ListView, CheckBox } from "std-widgets.slint";
+
+export struct RowItem {
+    text: string,
+    raw_text: string,
+    sev: int,
+    row_id: int,
+    origin_view_id: int,
+    marked: bool,
+}
+
+export struct TabItem {
+    title: string,
+    active: bool,
+}
+
+export struct DockerContainerItem {
+    id: string,
+    name: string,
+    image: string,
+    status: string,
+}
+
+export struct RecentFileItem {
+    path: string,
+    opened_at: string,
+    checked: bool,
+    exists: bool,
+}
+
+export component MainWindow inherits Window {
+    title: "LGX";
+    preferred-width: 900px;
+    preferred-height: 600px;
+    min-width: 640px;
+    min-height: 360px;
+
+    in-out property <[RowItem]> items: [];
+    in-out property <[RowItem]> marked_items: [];
+    in-out property <[TabItem]> tabs: [];
+    in-out property <[DockerContainerItem]> docker_containers: [];
+    in-out property <[RecentFileItem]> recent_files: [];
+    in property <string> status_text: "";
+    in property <string> perf_text: "";
+    in property <bool> busy: false;
+    in property <int> total_rows: 0;
+    in property <int> page_size: 200;
+    in-out property <bool> follow_enabled: true;
+    in-out property <bool> auto_scroll: true;
+    in-out property <bool> colorize: true;
+    in-out property <bool> show_utc_time: false;
+    in property <int> filter_min_severity: -1;
+    in property <bool> filter_has_timestamp: false;
+    in property <bool> filter_has_severity: false;
+    in property <string> new_lines_text: "";
+    in-out property <int> selected_row: -1;
+    in-out property <int> selected_marked_row: -1;
+    in-out property <bool> marked_pane_visible: false;
+    in-out property <bool> goto_dialog_open: false;
+    in-out property <bool> open_file_dialog_open: false;
+    in-out property <bool> recent_dialog_open: false;
+    in-out property <bool> docker_panel_visible: false;
+
+    callback open_file(string);
+    callback jump_to(string);
+    callback set_follow(bool);
+    callback set_auto_scroll(bool);
+    callback set_show_utc_time(bool);
+    callback activate_tab(int);
+    callback apply_filters(int, bool, bool);
+    callback jump_to_full_view();
+    callback toggle_mark_row(int);
+    callback activate_marked_row(int);
+    callback clear_filters();
+    callback toggle_marked_pane();
+    callback open_open_file_dialog();
+    callback close_open_file_dialog();
+    callback open_recent_dialog();
+    callback close_recent_dialog();
+    callback toggle_recent_file(int);
+    callback remove_recent_file(int);
+    callback open_selected_recent_files();
+    callback open_goto_dialog();
+    callback close_goto_dialog();
+    callback refresh_docker();
+    callback open_docker_container(string, string);
+
+    function severity_color(sev: int) -> color {
+        if (sev == 5) { return #C0392B; }
+        if (sev == 4) { return #D98C00; }
+        if (sev == 6) { return #8B0000; }
+        if (sev == 3) { return #1F3A5F; }
+        if (sev == 2) { return #0F8B8D; }
+        if (sev == 1) { return #6C6C6C; }
+        return #000000;
+    }
+
+    init => {
+        app_focus.focus();
+    }
+
+    MenuBar {
+        Menu {
+            title: "File";
+
+            MenuItem {
+                title: "Open File...";
+                activated => {
+                    root.open_open_file_dialog();
+                }
+            }
+
+            MenuItem {
+                title: "Recent";
+                activated => {
+                    root.open_recent_dialog();
+                }
+            }
+
+            MenuItem {
+                title: "Docker";
+                checkable: true;
+                checked: root.docker_panel_visible;
+                activated => {
+                    root.docker_panel_visible = !root.docker_panel_visible;
+                    if (root.docker_panel_visible) {
+                        root.refresh_docker();
+                    }
+                }
+            }
+
+            MenuItem {
+                title: "Go To Line...";
+                activated => {
+                    root.open_goto_dialog();
+                }
+            }
+        }
+
+        Menu {
+            title: "View";
+
+            MenuItem {
+                title: "Follow";
+                checkable: true;
+                checked: root.follow_enabled;
+                activated => {
+                    root.set_follow(!root.follow_enabled);
+                }
+            }
+
+            MenuItem {
+                title: "Colorize";
+                checkable: true;
+                checked: root.colorize;
+                activated => {
+                    root.colorize = !root.colorize;
+                }
+            }
+
+            MenuItem {
+                title: "Show UTC Time";
+                checkable: true;
+                checked: root.show_utc_time;
+                activated => {
+                    root.set_show_utc_time(!root.show_utc_time);
+                }
+            }
+
+            MenuItem {
+                title: "Auto Scroll";
+                checkable: true;
+                checked: root.auto_scroll;
+                activated => {
+                    root.set_auto_scroll(!root.auto_scroll);
+                }
+            }
+
+            MenuItem {
+                title: "Marked Lines";
+                checkable: true;
+                checked: root.marked_pane_visible;
+                activated => {
+                    root.toggle_marked_pane();
+                }
+            }
+
+            MenuItem {
+                title: "Full View";
+                activated => {
+                    root.jump_to_full_view();
+                }
+            }
+        }
+
+        Menu {
+            title: "Filters";
+
+            MenuItem {
+                title: "All Rows";
+                checkable: true;
+                checked: root.filter_min_severity < 0 && !root.filter_has_timestamp && !root.filter_has_severity;
+                activated => {
+                    root.clear_filters();
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                title: "Info+";
+                checkable: true;
+                checked: root.filter_min_severity == 3;
+                activated => {
+                    root.apply_filters(3, root.filter_has_timestamp, root.filter_has_severity);
+                }
+            }
+
+            MenuItem {
+                title: "Warn+";
+                checkable: true;
+                checked: root.filter_min_severity == 4;
+                activated => {
+                    root.apply_filters(4, root.filter_has_timestamp, root.filter_has_severity);
+                }
+            }
+
+            MenuItem {
+                title: "Error+";
+                checkable: true;
+                checked: root.filter_min_severity == 5;
+                activated => {
+                    root.apply_filters(5, root.filter_has_timestamp, root.filter_has_severity);
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                title: "Has Timestamp";
+                checkable: true;
+                checked: root.filter_has_timestamp;
+                activated => {
+                    root.apply_filters(root.filter_min_severity, !root.filter_has_timestamp, root.filter_has_severity);
+                }
+            }
+
+            MenuItem {
+                title: "Has Severity";
+                checkable: true;
+                checked: root.filter_has_severity;
+                activated => {
+                    root.apply_filters(root.filter_min_severity, root.filter_has_timestamp, !root.filter_has_severity);
+                }
+            }
+        }
+    }
+
+    app_focus := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "l" || event.text == "L")) {
+                root.open_goto_dialog();
+                return accept;
+            }
+            if (!event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta
+                    && (event.text == "f" || event.text == "F")) {
+                root.set_auto_scroll(!root.auto_scroll);
+                return accept;
+            }
+            reject
+        }
+
+        VerticalBox {
+            padding: 12px;
+            spacing: 10px;
+
+        HorizontalBox {
+            spacing: 6px;
+
+            for tab[index] in root.tabs: Rectangle {
+                height: 30px;
+                min-width: 120px;
+                background: tab.active ? #DCEBFF : #ECECEC;
+                border-color: tab.active ? #7AA9E6 : #C8C8C8;
+                border-width: 1px;
+
+                tab_touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => {
+                        root.activate_tab(index);
+                    }
+                }
+
+                Text {
+                    x: 10px;
+                    horizontal-stretch: 1;
+                    text: tab.title;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                text: root.busy ? "Indexing..." : "";
+                vertical-alignment: center;
+            }
+        }
+
+        if (root.docker_panel_visible) : Rectangle {
+            background: #F7F7F7;
+            border-color: #D3D3D3;
+            border-width: 1px;
+            height: 180px;
+
+            VerticalBox {
+                padding: 8px;
+                spacing: 6px;
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    Text {
+                        text: "Docker Containers";
+                    }
+
+                    Button {
+                        text: "Refresh";
+                        clicked => {
+                            root.refresh_docker();
+                        }
+                    }
+                }
+
+                ListView {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    for container[i] in root.docker_containers: Rectangle {
+                        height: 30px;
+
+                        HorizontalBox {
+                            spacing: 8px;
+                            horizontal-stretch: 1;
+
+                            Text {
+                                min-width: 140px;
+                                text: container.name;
+                                height: parent.height;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                min-width: 180px;
+                                text: container.image;
+                                height: parent.height;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                min-width: 160px;
+                                text: container.status;
+                                height: parent.height;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Button {
+                                height: parent.height;
+                                text: "Open";
+                                clicked => {
+                                    root.open_docker_container(container.id, container.name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 10px;
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+
+            log_panel := Rectangle {
+                background: #FFFFFF;
+                border-color: #D3D3D3;
+                border-width: 1px;
+                clip: true;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+
+                log_view := ListView {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    for item[i] in root.items: Rectangle {
+                        height: 28px;
+                        background: root.selected_row == i ? #DCEBFF : #FFFFFF;
+
+                        row_touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            clicked => {
+                                root.selected_row = i;
+                            }
+                        }
+
+                        HorizontalBox {
+                            spacing: 6px;
+                            horizontal-stretch: 1;
+
+                            CheckBox {
+                                width: 22px;
+                                height: parent.height;
+                                text: "";
+                                checked: item.marked;
+                                toggled => {
+                                    root.toggle_mark_row(i);
+                                }
+                            }
+
+                            Text {
+                                width: 64px;
+                                height: parent.height;
+                                text: (item.row_id + 1);
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                font-family: "monospace";
+                                color: #666666;
+                            }
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                height: parent.height;
+                                clip: true;
+
+                                Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: item.text;
+                                    color: root.colorize ? root.severity_color(item.sev) : #000000;
+                                    font-family: "monospace";
+                                    vertical-alignment: center;
+                                    wrap: no-wrap;
+                                    overflow: clip;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (root.marked_pane_visible) : Rectangle {
+                background: #FAFAFA;
+                border-color: #D3D3D3;
+                border-width: 1px;
+                clip: true;
+                width: 300px;
+                vertical-stretch: 1;
+
+                VerticalBox {
+                    padding: 8px;
+                    spacing: 6px;
+
+                    Text {
+                        text: "Marked";
+                        color: #444444;
+                    }
+
+                    ListView {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        for item[i] in root.marked_items: Rectangle {
+                            height: 28px;
+                            background: root.selected_marked_row == i ? #DCEBFF : #FFFFFF;
+
+                            marked_touch := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                clicked => {
+                                    root.selected_marked_row = i;
+                                    root.activate_marked_row(i);
+                                }
+                            }
+
+                            HorizontalBox {
+                                spacing: 6px;
+                                horizontal-stretch: 1;
+
+                                Text {
+                                    width: 64px;
+                                    height: parent.height;
+                                    text: (item.row_id + 1);
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                    font-family: "monospace";
+                                    color: #666666;
+                                }
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: parent.height;
+                                    clip: true;
+
+                                    Text {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: item.text;
+                                        color: root.colorize ? root.severity_color(item.sev) : #000000;
+                                        font-family: "monospace";
+                                        vertical-alignment: center;
+                                        wrap: no-wrap;
+                                        overflow: clip;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (root.open_file_dialog_open) : Rectangle {
+            background: #F7F7F7;
+            border-color: #C8C8C8;
+            border-width: 1px;
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 10px;
+
+                Text {
+                    text: "Open file";
+                }
+
+                file_input := LineEdit {
+                    placeholder-text: "/var/log/syslog";
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    Button {
+                        text: "Open";
+                        clicked => {
+                            root.open_file(file_input.text);
+                            root.close_open_file_dialog();
+                        }
+                    }
+
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            root.close_open_file_dialog();
+                        }
+                    }
+                }
+            }
+        }
+
+        if (root.recent_dialog_open) : Rectangle {
+            background: #F7F7F7;
+            border-color: #C8C8C8;
+            border-width: 1px;
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 10px;
+
+                Text {
+                    text: "Recent files";
+                }
+
+                Rectangle {
+                    border-color: #D3D3D3;
+                    border-width: 1px;
+                    background: #FFFFFF;
+                    height: 280px;
+
+                    ListView {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        for item[i] in root.recent_files: Rectangle {
+                            height: 32px;
+
+                            HorizontalBox {
+                                spacing: 8px;
+                                horizontal-stretch: 1;
+
+                                CheckBox {
+                                    width: 22px;
+                                    height: parent.height;
+                                    text: "";
+                                    checked: item.checked;
+                                    toggled => {
+                                        root.toggle_recent_file(i);
+                                    }
+                                }
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    height: parent.height;
+                                    text: item.path;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    color: item.exists ? #000000 : #555555;
+                                }
+
+                                Text {
+                                    width: 180px;
+                                    height: parent.height;
+                                    text: item.opened_at;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    color: #666666;
+                                }
+
+                                Button {
+                                    width: 32px;
+                                    height: parent.height;
+                                    text: "🗑";
+                                    clicked => {
+                                        root.remove_recent_file(i);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    Button {
+                        text: "Open";
+                        clicked => {
+                            root.open_selected_recent_files();
+                        }
+                    }
+
+                    Button {
+                        text: "Closed";
+                        clicked => {
+                            root.close_recent_dialog();
+                        }
+                    }
+                }
+            }
+        }
+
+        if (root.goto_dialog_open) : Rectangle {
+            background: #F7F7F7;
+            border-color: #C8C8C8;
+            border-width: 1px;
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 10px;
+
+                Text {
+                    text: "Go to line";
+                }
+
+                goto_input := LineEdit {
+                    placeholder-text: "Line #";
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    Button {
+                        text: "Go";
+                        clicked => {
+                            root.jump_to(goto_input.text);
+                            root.close_goto_dialog();
+                        }
+                    }
+
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            root.close_goto_dialog();
+                        }
+                    }
+                }
+            }
+        }
+
+            Text {
+                text: root.status_text;
+                color: #AA0000;
+            }
+
+            Text {
+                text: root.new_lines_text;
+                color: #555555;
+            }
+
+            Text {
+                text: root.perf_text;
+                color: #555555;
+            }
+        }
+    }
+
+}

@@ -1,0 +1,11 @@
+[package]
+name = "lgx-source-docker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lgx-core = { path = "../../core" }
+lgx-source-api = { path = "../../source-api" }
+lgx-parsing = { path = "../../parsing" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
