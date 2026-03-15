@@ -43,12 +43,13 @@ Performance, correctness, and extensibility take priority over visual effects.
 
 * Right-click on tokens (UUIDs, IDs, JSON fields, timestamps) enables:
 
-  * Creating a new view with a derived filter
-  * Opening the new view in:
+  * Pop ups a menu that allows:
+    * Creating a new view with a derived filter
+    * Opening the new view in:
 
-    * the same window
-    * a new tab
-    * a new window
+        * the same window
+        * a new tab
+        * a new window
 
 ---
 
@@ -118,6 +119,7 @@ Sources may include:
 * Docker container logs
 * Loki
 * Journalctl
+* apk logcat
 * Custom or future backends
 
 The UI and view engine **must not assume**:
