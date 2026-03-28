@@ -75,6 +75,7 @@ impl Engine {
                     source_view_id,
                     query,
                 } => self.handle_open_filtered_view(source_view_id, query),
+                EngineCommand::CloseView { view_id } => self.handle_close_view(view_id),
                 EngineCommand::JumpToFullView {
                     source_view_id,
                     row_id,
@@ -681,6 +682,15 @@ impl Engine {
         }
     }
 
+    fn handle_close_view(&mut self, view_id: ViewId) {
+        let mut state = self.state.lock().expect("engine state lock");
+        state.views.remove(&view_id);
+        state.runtime_views.remove(&view_id);
+        if state.marked_view_id == Some(view_id) {
+            state.marked_view_id = None;
+        }
+    }
+
     fn handle_jump_to_full_view(&mut self, source_view_id: ViewId, row_id: RowId) {
         let target = {
             let state = self.state.lock().expect("engine state lock");
@@ -808,6 +818,20 @@ impl Engine {
 
 fn filtered_view_title(parent_title: &str, query: &ViewQuery) -> String {
     let mut parts = Vec::new();
+    if let Some(mask) = query.severity_mask {
+        let labels = [
+            (1u8 << 0, "trace"),
+            (1u8 << 1, "debug"),
+            (1u8 << 2, "info"),
+            (1u8 << 3, "warn"),
+            (1u8 << 4, "error"),
+            (1u8 << 5, "fatal"),
+        ]
+        .into_iter()
+        .filter_map(|(bit, label)| (mask & bit != 0).then_some(label))
+        .collect::<Vec<_>>();
+        parts.push(format!("sev={}", labels.join("|")));
+    }
     if let Some(min) = query.min_severity {
         parts.push(format!("sev>={min}"));
     }
@@ -816,6 +840,20 @@ fn filtered_view_title(parent_title: &str, query: &ViewQuery) -> String {
     }
     if query.required_flags & 2 != 0 {
         parts.push("has-sev".to_string());
+    }
+    if let Some(text) = query.text.as_ref().filter(|text| !text.is_empty()) {
+        let mode = if query.text_is_regex { "re" } else { "text" };
+        let scope = if query.text_message_only {
+            "msg"
+        } else {
+            "raw"
+        };
+        let case = if query.text_case_insensitive {
+            "icase"
+        } else {
+            "case"
+        };
+        parts.push(format!("{mode}:{scope}:{case}:{text}"));
     }
     if parts.is_empty() {
         parent_title.to_string()

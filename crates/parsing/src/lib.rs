@@ -66,6 +66,10 @@ impl MetaParser {
             ParserKind::Plain => parse_plain(line),
         }
     }
+
+    pub fn message_text<'a>(&self, line: &'a [u8]) -> &'a [u8] {
+        message_text(self.kind, line)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +149,18 @@ fn parse_plain(line: &[u8]) -> Meta {
         meta.flags |= FLAG_SEV_VALID;
     }
     meta
+}
+
+pub fn message_text<'a>(kind: ParserKind, line: &'a [u8]) -> &'a [u8] {
+    match kind {
+        ParserKind::Json => extract_json_string(line, b"msg")
+            .or_else(|| extract_json_string(line, b"message"))
+            .unwrap_or(line),
+        ParserKind::Journal => extract_kv_value(line, b"msg").unwrap_or(line),
+        ParserKind::Kern => split_after_colon_space(line).unwrap_or(line),
+        ParserKind::Logfault => split_logfault_message(line).unwrap_or(line),
+        ParserKind::Nginx | ParserKind::Plain => line,
+    }
 }
 
 fn parse_json(line: &[u8]) -> Meta {
@@ -556,6 +572,44 @@ fn extract_json_string<'a>(line: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
             return None;
         }
         return Some(&line[start..i]);
+    }
+    None
+}
+
+fn extract_kv_value<'a>(line: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
+    let mut pattern = Vec::with_capacity(key.len() + 1);
+    pattern.extend_from_slice(key);
+    pattern.push(b'=');
+    let pos = find_subslice(line, &pattern)?;
+    let start = pos + pattern.len();
+    if start >= line.len() {
+        return None;
+    }
+    if line[start] == b'"' {
+        let value_start = start + 1;
+        let end = find_byte(&line[value_start..], b'"')? + value_start;
+        return Some(&line[value_start..end]);
+    }
+    let end = scan_token_end(line, start);
+    Some(&line[start..end])
+}
+
+fn split_after_colon_space(line: &[u8]) -> Option<&[u8]> {
+    let pos = find_subslice(line, b": ")?;
+    let start = pos + 2;
+    (start < line.len()).then_some(&line[start..])
+}
+
+fn split_logfault_message(line: &[u8]) -> Option<&[u8]> {
+    let mut spaces = 0usize;
+    for (idx, byte) in line.iter().enumerate() {
+        if *byte == b' ' {
+            spaces += 1;
+            if spaces == 4 {
+                let start = idx + 1;
+                return (start < line.len()).then_some(&line[start..]);
+            }
+        }
     }
     None
 }

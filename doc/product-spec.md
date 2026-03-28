@@ -66,6 +66,8 @@ Tabs and splitters allows user convenenty access to information
 * A window may show multiple docked views at once.
 * Each view owns its own natural scrollbars.
 * Auxiliary controls must not live in drawers outside the actual log view.
+* Optional docked views must expose a small hover-close `[x]` affordance in the upper-right corner of the pane.
+* Closing an optional docked view must remove it from the visible split layout without affecting the primary log view.
 
 ## 3.3 Views
 
@@ -88,6 +90,17 @@ Views are:
 Special MVP view:
 
 * Each window may contain one marked-lines view collecting user-selected rows from other views in that window.
+
+Optional view groups:
+
+* Optional views are listed in a top-level **Views** menu.
+* Each optional view group appears as a checkable menu item or submenu entry.
+* If one or more views in that group are currently open, the corresponding menu item must show as checked.
+* Clicking a group entry while one or more views in that group are open closes all views in that group in the current window.
+* Clicking a group entry while no views in that group are open opens one view of that group in the current window.
+* This rule applies both to single-instance groups such as **Marked** and to multi-instance groups such as future **Filter** views.
+* Optional panes are horizontal or vertical based on the state of the menu "View/Vertical Split""
+* Optional panes are resizeable. Initial default size is 30% (height or width, depending on the view mode)
 
 ---
 
@@ -237,7 +250,9 @@ Users can mark interesting log lines for later comparison.
 * Each row shows a clickable marker icon beside the line number
 * Clicking the marker adds or removes the row from the current window's marked-lines view
 * If no marked-lines view exists in the current window, LGX creates one by splitting the current view and docking the marked-lines view there
+* If the marked-lines pane has been closed and the user marks a new row, LGX re-opens the marked-lines pane automatically
 * Marked rows preserve a reference to the original source row so the user can navigate back
+* The marked-lines pane is also controllable from the **Views** menu and shows as checked there only while the pane is visible
 
 ---
 

@@ -61,6 +61,16 @@ impl WindowedRowsModel {
         self.notify.reset();
     }
 
+    pub fn clear(&self) {
+        let mut state = self.state.borrow_mut();
+        state.total_rows = 0;
+        state.window_start = 0;
+        state.rows.clear();
+        state.last_request = None;
+        drop(state);
+        self.notify.reset();
+    }
+
     pub fn set_total_rows(&self, total_rows: u32) {
         let mut state = self.state.borrow_mut();
         if state.total_rows == total_rows {

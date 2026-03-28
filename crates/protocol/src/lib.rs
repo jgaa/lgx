@@ -26,6 +26,9 @@ pub enum EngineCommand {
         source_view_id: ViewId,
         query: ViewQuery,
     },
+    CloseView {
+        view_id: ViewId,
+    },
     JumpToFullView {
         source_view_id: ViewId,
         row_id: RowId,

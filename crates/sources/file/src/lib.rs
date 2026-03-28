@@ -6,6 +6,7 @@ use lgx_core::{RowId, RowRender, SourceId, SourceInfo, SourceKind, SourceLocator
 use lgx_parsing::{MetaParser, ParserKind, ParserSelector};
 use lgx_source_api::{LogSource, SourceError, SourceRows, SourceUpdate};
 use memmap2::Mmap;
+use regex::RegexBuilder;
 
 #[derive(Debug)]
 pub enum FileError {
@@ -179,11 +180,15 @@ impl FileIndex {
     pub fn query_rows(&self, start: usize, end: usize, query: &ViewQuery) -> Vec<RowId> {
         let end = end.min(self.line_count());
         let mut rows = Vec::with_capacity(end.saturating_sub(start));
+        let regex = compile_query_regex(query);
         for row in start..end {
             let (_, sev, _) = match self.get_line_meta(row) {
                 Some(meta) => meta,
                 None => continue,
             };
+            if !severity_matches(query, sev) {
+                continue;
+            }
             if let Some(min) = query.min_severity {
                 if sev < min {
                     continue;
@@ -196,6 +201,12 @@ impl FileIndex {
             }
             let flags = self.flags.get(row).copied().unwrap_or(0);
             if query.required_flags != 0 && flags & query.required_flags != query.required_flags {
+                continue;
+            }
+            let Some(line) = self.get_line_bytes(row) else {
+                continue;
+            };
+            if !text_matches(query, self.parser.message_text(line), line, regex.as_ref()) {
                 continue;
             }
             rows.push(RowId(row as u64));
@@ -264,6 +275,63 @@ impl FileIndex {
             scan_duration: scan_start.elapsed(),
         }))
     }
+}
+
+fn severity_matches(query: &ViewQuery, sev: u8) -> bool {
+    match query.severity_mask {
+        Some(mask) => severity_bit(sev)
+            .map(|bit| mask & bit != 0)
+            .unwrap_or(false),
+        None => true,
+    }
+}
+
+fn severity_bit(sev: u8) -> Option<u8> {
+    if (1..=7).contains(&sev) {
+        Some(1u8 << (sev - 1))
+    } else {
+        None
+    }
+}
+
+fn compile_query_regex(query: &ViewQuery) -> Option<regex::Regex> {
+    let pattern = query.text.as_deref()?;
+    if pattern.is_empty() || !query.text_is_regex {
+        return None;
+    }
+    RegexBuilder::new(pattern)
+        .case_insensitive(query.text_case_insensitive)
+        .build()
+        .ok()
+}
+
+fn text_matches(
+    query: &ViewQuery,
+    message_line: &[u8],
+    raw_line: &[u8],
+    regex: Option<&regex::Regex>,
+) -> bool {
+    let Some(pattern) = query.text.as_deref() else {
+        return true;
+    };
+    if pattern.is_empty() {
+        return true;
+    }
+    let target_bytes = if query.text_message_only {
+        message_line
+    } else {
+        raw_line
+    };
+    let target = String::from_utf8_lossy(target_bytes);
+    if query.text_is_regex {
+        return regex
+            .map(|compiled| compiled.is_match(&target))
+            .unwrap_or(false);
+    }
+    if query.text_case_insensitive {
+        return target.to_lowercase().contains(&pattern.to_lowercase());
+    }
+    target.contains(pattern)
 }
 
 impl FileLogSource {

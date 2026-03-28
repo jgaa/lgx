@@ -18,9 +18,14 @@ use windowed_model::WindowedRowsModel;
 
 const WINDOW_SIZE: u32 = 800;
 const PREFETCH: u32 = 200;
+const ROW_HEIGHT_PX: f32 = 28.0;
+const JUMP_CONTEXT_ROWS: u32 = 3;
 const FLAG_TS_VALID: u8 = 1;
-const FLAG_SEV_VALID: u8 = 2;
 const RECENT_FILES_LIMIT: usize = 50;
+const MARKED_PANE_MIN_WIDTH: f32 = 180.0;
+const MARKED_PANE_MIN_HEIGHT: f32 = 120.0;
+const FILTER_PANE_MIN_WIDTH: f32 = 220.0;
+const FILTER_PANE_MIN_HEIGHT: f32 = 120.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AppConfig {
@@ -44,8 +49,6 @@ struct RecentFileState {
 
 struct ViewState {
     source_id: SourceId,
-    kind: ViewKind,
-    query: ViewQuery,
     title: String,
     model: Rc<WindowedRowsModel>,
     total_rows: u32,
@@ -53,23 +56,62 @@ struct ViewState {
     auto_scroll: bool,
     busy: bool,
     new_lines_text: String,
+    panes: PaneState,
+}
+
+struct PaneState {
+    marked_view_id: Option<ViewId>,
+    filter_view_id: Option<ViewId>,
+    marked_model: Rc<WindowedRowsModel>,
+    filter_model: Rc<WindowedRowsModel>,
+    marked_keys: HashSet<i32>,
+    marked_total_rows: u32,
+    filter_total_rows: u32,
+    marked_pane_open: bool,
+    filter_pane_open: bool,
+    pending_filter_request: bool,
+    filter_query: ViewQuery,
+}
+
+impl PaneState {
+    fn new(cmd_tx: &Sender<EngineCommand>) -> Self {
+        Self {
+            marked_view_id: None,
+            filter_view_id: None,
+            marked_model: Rc::new(WindowedRowsModel::new(
+                cmd_tx.clone(),
+                WINDOW_SIZE,
+                PREFETCH,
+            )),
+            filter_model: Rc::new(WindowedRowsModel::new(
+                cmd_tx.clone(),
+                WINDOW_SIZE,
+                PREFETCH,
+            )),
+            marked_keys: HashSet::new(),
+            marked_total_rows: 0,
+            filter_total_rows: 0,
+            marked_pane_open: false,
+            filter_pane_open: false,
+            pending_filter_request: false,
+            filter_query: ViewQuery::default(),
+        }
+    }
 }
 
 struct AppState {
     tabs: Vec<ViewId>,
     views: HashMap<ViewId, ViewState>,
     active_view: Option<ViewId>,
-    marked_view_id: Option<ViewId>,
     tabs_model: Rc<VecModel<ui::TabItem>>,
     empty_rows_model: Rc<VecModel<ui::RowItem>>,
-    marked_model: Rc<WindowedRowsModel>,
     docker_model: Rc<VecModel<ui::DockerContainerItem>>,
     recent_files_model: Rc<VecModel<ui::RecentFileItem>>,
-    marked_keys: HashSet<(ViewId, i32)>,
     recent_files: Vec<RecentFileState>,
-    marked_pane_open: bool,
     recent_dialog_open: bool,
     show_utc_time: bool,
+    vertical_split: bool,
+    cmd_tx: Sender<EngineCommand>,
 }
 
 impl AppState {
@@ -78,17 +120,15 @@ impl AppState {
             tabs: Vec::new(),
             views: HashMap::new(),
             active_view: None,
-            marked_view_id: None,
             tabs_model: Rc::new(VecModel::default()),
             empty_rows_model: Rc::new(VecModel::default()),
-            marked_model: Rc::new(WindowedRowsModel::new(cmd_tx, WINDOW_SIZE, PREFETCH)),
             docker_model: Rc::new(VecModel::default()),
             recent_files_model: Rc::new(VecModel::default()),
-            marked_keys: HashSet::new(),
             recent_files: Vec::new(),
-            marked_pane_open: false,
             recent_dialog_open: false,
             show_utc_time: false,
+            vertical_split: false,
+            cmd_tx,
         }
     }
 
@@ -96,8 +136,6 @@ impl AppState {
         &mut self,
         view_id: ViewId,
         source_id: SourceId,
-        kind: ViewKind,
-        query: ViewQuery,
         title: String,
         model: Rc<WindowedRowsModel>,
     ) {
@@ -106,8 +144,6 @@ impl AppState {
             view_id,
             ViewState {
                 source_id,
-                kind,
-                query,
                 title,
                 model,
                 total_rows: 0,
@@ -115,10 +151,17 @@ impl AppState {
                 auto_scroll: true,
                 busy: false,
                 new_lines_text: String::new(),
+                panes: PaneState::new(&self.cmd_tx),
             },
         );
         self.active_view = Some(view_id);
         self.sync_tabs_model();
+    }
+
+    fn find_view_by_source_id(&self, source_id: SourceId) -> Option<ViewId> {
+        self.views
+            .iter()
+            .find_map(|(view_id, view)| (view.source_id == source_id).then_some(*view_id))
     }
 
     fn sync_tabs_model(&self) {
@@ -162,7 +205,8 @@ fn main() {
         let state = app_state.borrow();
         window.set_tabs(ModelRc::new(state.tabs_model.clone()));
         window.set_items(ModelRc::new(state.empty_rows_model.clone()));
-        window.set_marked_items(ModelRc::new(state.marked_model.clone()));
+        window.set_marked_items(ModelRc::new(state.empty_rows_model.clone()));
+        window.set_filter_items(ModelRc::new(state.empty_rows_model.clone()));
         window.set_docker_containers(ModelRc::new(state.docker_model.clone()));
         window.set_recent_files(ModelRc::new(state.recent_files_model.clone()));
     }
@@ -220,6 +264,18 @@ fn main() {
         }
     });
 
+    let state_for_split_mode = app_state.clone();
+    let ui_weak = window.as_weak();
+    window.on_set_vertical_split(move |enabled| {
+        {
+            let mut state = state_for_split_mode.borrow_mut();
+            state.vertical_split = enabled;
+        }
+        if let Some(ui) = ui_weak.upgrade() {
+            ui.set_vertical_split(enabled);
+        }
+    });
+
     let state_for_jump = app_state.clone();
     window.on_jump_to(move |text| {
         if let Ok(value) = text.trim().parse::<u32>() {
@@ -254,18 +310,31 @@ fn main() {
 
     let cmd_tx_filter = cmd_tx.clone();
     let state_for_filter = app_state.clone();
-    window.on_apply_filters(move |min_severity, has_timestamp, has_severity| {
+    let ui_weak = window.as_weak();
+    window.on_apply_filters(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
         let active_view = state_for_filter.borrow().active_view;
         if let Some(source_view_id) = active_view {
-            let query = ViewQuery {
-                min_severity: (min_severity >= 0).then_some(min_severity.min(u8::MAX as i32) as u8),
-                max_severity: None,
-                required_flags: (if has_timestamp { FLAG_TS_VALID } else { 0 })
-                    | (if has_severity { FLAG_SEV_VALID } else { 0 }),
-            };
+            let query = build_filter_query(&ui);
             if query.is_empty() {
+                clear_filters(&ui, &state_for_filter, &cmd_tx_filter);
                 return;
             }
+            close_filter_view_for_active(&state_for_filter, &cmd_tx_filter);
+            {
+                let mut state = state_for_filter.borrow_mut();
+                if let Some(view) = state.views.get_mut(&source_view_id) {
+                    view.panes.pending_filter_request = true;
+                    view.panes.filter_query = query.clone();
+                    view.panes.filter_pane_open = true;
+                }
+            }
+            reset_filter_pane_size(&ui);
+            ui.set_filter_pane_visible(true);
+            ui.set_filter_total_matches(0);
+            ui.set_selected_filter_row(-1);
             let _ = cmd_tx_filter.send(EngineCommand::OpenFilteredView {
                 source_view_id,
                 query,
@@ -274,12 +343,13 @@ fn main() {
     });
 
     let state_for_clear = app_state.clone();
+    let cmd_tx_clear = cmd_tx.clone();
     let ui_weak = window.as_weak();
     window.on_clear_filters(move || {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        clear_filters(&ui, &state_for_clear);
+        clear_filters(&ui, &state_for_clear, &cmd_tx_clear);
     });
 
     let cmd_tx_jump_full = cmd_tx.clone();
@@ -330,6 +400,23 @@ fn main() {
         }
         if let Some(ui) = ui_weak.upgrade() {
             activate_marked_row(&ui, &state_for_marked, &cmd_tx_marked, row as usize);
+        }
+    });
+
+    let cmd_tx_filter_jump = cmd_tx.clone();
+    let state_for_filter_jump = app_state.clone();
+    let ui_weak = window.as_weak();
+    window.on_activate_filter_row(move |row| {
+        if row < 0 {
+            return;
+        }
+        if let Some(ui) = ui_weak.upgrade() {
+            activate_filter_row(
+                &ui,
+                &state_for_filter_jump,
+                &cmd_tx_filter_jump,
+                row as usize,
+            );
         }
     });
 
@@ -468,14 +555,50 @@ fn main() {
 
     let ui_weak = window.as_weak();
     let state_for_marked_pane = app_state.clone();
-    window.on_toggle_marked_pane(move || {
+    window.on_set_marked_pane_visible(move |requested_visible| {
         if let Some(ui) = ui_weak.upgrade() {
             let visible = {
                 let mut state = state_for_marked_pane.borrow_mut();
-                state.marked_pane_open = !state.marked_pane_open;
-                state.marked_view_id.is_some() && state.marked_pane_open
+                let Some(active_view) = state.active_view else {
+                    return;
+                };
+                let Some(view) = state.views.get_mut(&active_view) else {
+                    return;
+                };
+                view.panes.marked_pane_open = requested_visible;
+                view.panes.marked_view_id.is_some() && view.panes.marked_pane_open
             };
+            if visible {
+                reset_marked_pane_size(&ui);
+            }
             ui.set_marked_pane_visible(visible);
+        }
+    });
+
+    let ui_weak = window.as_weak();
+    let state_for_filter_pane = app_state.clone();
+    let cmd_tx_filter_pane = cmd_tx.clone();
+    window.on_set_filter_pane_visible(move |requested_visible| {
+        if let Some(ui) = ui_weak.upgrade() {
+            let active_view = state_for_filter_pane.borrow().active_view;
+            {
+                let mut state = state_for_filter_pane.borrow_mut();
+                if let Some(active_view) = active_view {
+                    if let Some(view) = state.views.get_mut(&active_view) {
+                        view.panes.filter_pane_open = requested_visible;
+                    }
+                }
+            }
+            if requested_visible {
+                reset_filter_pane_size(&ui);
+            }
+            if !requested_visible {
+                close_filter_view_for_active(&state_for_filter_pane, &cmd_tx_filter_pane);
+                reset_filter_controls(&ui);
+                ui.set_filter_total_matches(0);
+                ui.set_selected_filter_row(-1);
+            }
+            ui.set_filter_pane_visible(requested_visible);
         }
     });
 
@@ -760,16 +883,62 @@ fn drain_events(
     }
 }
 
+fn owner_view_for_marked_pane(
+    app_state: &Rc<RefCell<AppState>>,
+    marked_view_id: ViewId,
+) -> Option<ViewId> {
+    let state = app_state.borrow();
+    state.views.iter().find_map(|(view_id, view)| {
+        (view.panes.marked_view_id == Some(marked_view_id)).then_some(*view_id)
+    })
+}
+
+fn owner_view_for_filter_pane(
+    app_state: &Rc<RefCell<AppState>>,
+    filter_view_id: ViewId,
+) -> Option<ViewId> {
+    let state = app_state.borrow();
+    state.views.iter().find_map(|(view_id, view)| {
+        (view.panes.filter_view_id == Some(filter_view_id)).then_some(*view_id)
+    })
+}
+
+fn reset_marked_pane_size(ui: &MainWindow) {
+    let window = ui.window();
+    let logical_size = window.size().to_logical(window.scale_factor());
+    if ui.get_vertical_split() {
+        ui.set_marked_pane_height((logical_size.height * 0.3).max(MARKED_PANE_MIN_HEIGHT));
+    } else {
+        ui.set_marked_pane_width((logical_size.width * 0.3).max(MARKED_PANE_MIN_WIDTH));
+    }
+}
+
+fn reset_filter_pane_size(ui: &MainWindow) {
+    let window = ui.window();
+    let logical_size = window.size().to_logical(window.scale_factor());
+    if ui.get_vertical_split() {
+        ui.set_filter_pane_height((logical_size.height * 0.3).max(FILTER_PANE_MIN_HEIGHT));
+    } else {
+        ui.set_filter_pane_width((logical_size.width * 0.3).max(FILTER_PANE_MIN_WIDTH));
+    }
+}
+
 fn activate_view(ui: &MainWindow, app_state: &Rc<RefCell<AppState>>, view_id: ViewId) {
     let (
         items_model,
+        marked_items_model,
+        filter_items_model,
         total_rows,
         follow_enabled,
         auto_scroll,
         busy,
         new_lines_text,
-        query,
         show_utc_time,
+        vertical_split,
+        marked_visible,
+        filter_visible,
+        filter_total_rows,
+        filter_query,
     ) = {
         let mut state = app_state.borrow_mut();
         state.active_view = Some(view_id);
@@ -777,56 +946,78 @@ fn activate_view(ui: &MainWindow, app_state: &Rc<RefCell<AppState>>, view_id: Vi
         match state.views.get(&view_id) {
             Some(view) => (
                 ModelRc::new(view.model.clone()),
+                ModelRc::new(view.panes.marked_model.clone()),
+                ModelRc::new(view.panes.filter_model.clone()),
                 view.total_rows,
                 view.follow_enabled,
                 view.auto_scroll,
                 view.busy,
                 view.new_lines_text.clone(),
-                view.query.clone(),
                 state.show_utc_time,
+                state.vertical_split,
+                view.panes.marked_view_id.is_some() && view.panes.marked_pane_open,
+                view.panes.filter_pane_open,
+                view.panes.filter_total_rows,
+                view.panes.filter_query.clone(),
             ),
             None => (
+                ModelRc::new(state.empty_rows_model.clone()),
+                ModelRc::new(state.empty_rows_model.clone()),
                 ModelRc::new(state.empty_rows_model.clone()),
                 0,
                 true,
                 true,
                 false,
                 String::new(),
-                ViewQuery::default(),
                 state.show_utc_time,
+                state.vertical_split,
+                false,
+                false,
+                0,
+                ViewQuery::default(),
             ),
         }
     };
 
     ui.set_items(items_model);
+    ui.set_marked_items(marked_items_model);
+    ui.set_filter_items(filter_items_model);
     ui.set_total_rows(total_rows as i32);
     ui.set_follow_enabled(follow_enabled);
     ui.set_auto_scroll(auto_scroll);
     ui.set_busy(busy);
     ui.set_new_lines_text(new_lines_text.into());
     ui.set_show_utc_time(show_utc_time);
-    ui.set_filter_min_severity(query.min_severity.map(i32::from).unwrap_or(-1));
-    ui.set_filter_has_timestamp(query.required_flags & FLAG_TS_VALID != 0);
-    ui.set_filter_has_severity(query.required_flags & FLAG_SEV_VALID != 0);
+    ui.set_vertical_split(vertical_split);
     ui.set_selected_row(-1);
     ui.set_selected_marked_row(-1);
-    let state = app_state.borrow();
-    let marked_visible = state.marked_view_id.is_some() && state.marked_pane_open;
+    ui.set_selected_filter_row(-1);
     ui.set_marked_pane_visible(marked_visible);
+    ui.set_filter_pane_visible(filter_visible);
+    ui.set_filter_total_matches(filter_total_rows as i32);
+    sync_filter_controls(ui, &filter_query);
 }
 
 fn refresh_visible_rows(ui: &MainWindow, app_state: &Rc<RefCell<AppState>>) {
-    let (active_model, marked_model) = {
+    let (active_model, marked_model, filter_model) = {
         let state = app_state.borrow();
         let active_model = state
             .active_view
             .and_then(|view_id| state.views.get(&view_id).map(|view| view.model.clone()));
-        let marked_model = if state.marked_view_id.is_some() && state.marked_pane_open {
-            Some(state.marked_model.clone())
-        } else {
-            None
-        };
-        (active_model, marked_model)
+        let marked_model = state.active_view.and_then(|view_id| {
+            state.views.get(&view_id).and_then(|view| {
+                (view.panes.marked_view_id.is_some() && view.panes.marked_pane_open)
+                    .then_some(view.panes.marked_model.clone())
+            })
+        });
+        let filter_model = state.active_view.and_then(|view_id| {
+            state.views.get(&view_id).and_then(|view| {
+                view.panes
+                    .filter_pane_open
+                    .then_some(view.panes.filter_model.clone())
+            })
+        });
+        (active_model, marked_model, filter_model)
     };
 
     if let Some(model) = active_model {
@@ -835,6 +1026,11 @@ fn refresh_visible_rows(ui: &MainWindow, app_state: &Rc<RefCell<AppState>>) {
         model.request_range(start, count);
     }
     if let Some(model) = marked_model {
+        let start = model.current_window_start();
+        let count = model.current_window_len().max(1);
+        model.request_range(start, count);
+    }
+    if let Some(model) = filter_model {
         let start = model.current_window_start();
         let count = model.current_window_len().max(1);
         model.request_range(start, count);
@@ -963,17 +1159,78 @@ fn apply_event(
             ..
         } => {
             if kind == ViewKind::Marked {
-                {
+                let owner_view_id = app_state.borrow().find_view_by_source_id(source_id);
+                let is_active = {
                     let mut state = app_state.borrow_mut();
-                    state.marked_view_id = Some(view_id);
-                    state.marked_pane_open = true;
-                    state.marked_model.set_view(view_id);
+                    let Some(owner_view_id) = owner_view_id else {
+                        return;
+                    };
+                    let is_active = state.active_view == Some(owner_view_id);
+                    if let Some(view) = state.views.get_mut(&owner_view_id) {
+                        view.panes.marked_view_id = Some(view_id);
+                        view.panes.marked_pane_open = true;
+                        view.panes.marked_total_rows = total_rows;
+                        view.panes.marked_model.set_view(view_id);
+                        view.panes.marked_model.set_total_rows(total_rows);
+                    }
+                    is_active
+                };
+                if is_active {
+                    reset_marked_pane_size(ui);
+                    ui.set_marked_pane_visible(true);
                 }
-                ui.set_marked_pane_visible(true);
-                let state = app_state.borrow();
-                state.marked_model.set_total_rows(total_rows);
-                if total_rows > 0 {
-                    state.marked_model.request_range(0, total_rows.max(1));
+                if let Some(owner_view_id) = owner_view_id {
+                    if let Some(view) = app_state.borrow().views.get(&owner_view_id) {
+                        if total_rows > 0 {
+                            view.panes.marked_model.request_range(0, total_rows.max(1));
+                        }
+                    }
+                }
+            } else if kind == ViewKind::Filtered {
+                let owner_view_id = app_state.borrow().find_view_by_source_id(source_id);
+                let pending_filter = {
+                    let mut state = app_state.borrow_mut();
+                    let Some(owner_view_id) = owner_view_id else {
+                        return;
+                    };
+                    let Some(view) = state.views.get_mut(&owner_view_id) else {
+                        return;
+                    };
+                    if !view.panes.pending_filter_request {
+                        false
+                    } else {
+                        view.panes.pending_filter_request = false;
+                        view.panes.filter_view_id = Some(view_id);
+                        view.panes.filter_total_rows = total_rows;
+                        view.panes.filter_model.set_view(view_id);
+                        view.panes.filter_model.set_total_rows(total_rows);
+                        view.panes.filter_model.clear();
+                        true
+                    }
+                };
+                if pending_filter {
+                    if app_state.borrow().active_view == owner_view_id {
+                        reset_filter_pane_size(ui);
+                        ui.set_filter_pane_visible(true);
+                        ui.set_filter_total_matches(total_rows as i32);
+                        ui.set_selected_filter_row(-1);
+                    }
+                    if let Some(owner_view_id) = owner_view_id {
+                        if let Some(view) = app_state.borrow().views.get(&owner_view_id) {
+                            if total_rows > 0 {
+                                view.panes
+                                    .filter_model
+                                    .request_range(0, total_rows.max(1).min(WINDOW_SIZE));
+                            }
+                        }
+                    }
+                } else {
+                    handle_view_opened(
+                        ui, app_state, cmd_tx, view_id, source_id, title, kind, query,
+                    );
+                    if app_state.borrow().active_view == Some(view_id) {
+                        ui.set_total_rows(total_rows as i32);
+                    }
                 }
             } else {
                 handle_view_opened(
@@ -988,10 +1245,45 @@ fn apply_event(
             view_id,
             total_rows,
         } => {
-            if app_state.borrow().marked_view_id == Some(view_id) {
-                let state = app_state.borrow();
-                state.marked_model.set_total_rows(total_rows);
-                state.marked_model.request_range(0, total_rows.max(1));
+            if let Some(owner_view_id) = owner_view_for_marked_pane(app_state, view_id) {
+                let should_show = {
+                    let mut state = app_state.borrow_mut();
+                    let Some(view) = state.views.get_mut(&owner_view_id) else {
+                        return;
+                    };
+                    let should_show =
+                        total_rows > view.panes.marked_total_rows && !view.panes.marked_pane_open;
+                    view.panes.marked_total_rows = total_rows;
+                    view.panes.marked_model.set_total_rows(total_rows);
+                    view.panes.marked_model.request_range(0, total_rows.max(1));
+                    if should_show {
+                        view.panes.marked_pane_open = true;
+                    }
+                    should_show
+                };
+                if should_show && app_state.borrow().active_view == Some(owner_view_id) {
+                    reset_marked_pane_size(ui);
+                    ui.set_marked_pane_visible(true);
+                }
+                return;
+            }
+            if let Some(owner_view_id) = owner_view_for_filter_pane(app_state, view_id) {
+                {
+                    let mut state = app_state.borrow_mut();
+                    let Some(view) = state.views.get_mut(&owner_view_id) else {
+                        return;
+                    };
+                    view.panes.filter_total_rows = total_rows;
+                    view.panes.filter_model.set_total_rows(total_rows);
+                    if total_rows > 0 && view.panes.filter_model.current_window_len() == 0 {
+                        view.panes
+                            .filter_model
+                            .request_range(0, total_rows.max(1).min(WINDOW_SIZE));
+                    }
+                }
+                if app_state.borrow().active_view == Some(owner_view_id) {
+                    ui.set_filter_total_matches(total_rows as i32);
+                }
                 return;
             }
             let is_active = {
@@ -1018,6 +1310,9 @@ fn apply_event(
             if let Some(model) = model {
                 let start = row.saturating_sub(WINDOW_SIZE / 4);
                 model.request_range(start, WINDOW_SIZE);
+                let top_row = row.saturating_sub(JUMP_CONTEXT_ROWS);
+                ui.set_log_viewport_y(-((top_row as f32) * ROW_HEIGHT_PX));
+                ui.set_selected_row(row.min(i32::MAX as u32) as i32);
             }
             ui.set_status_text(format!("Jumped to row {}", row + 1).into());
         }
@@ -1052,7 +1347,7 @@ fn apply_event(
             start,
             rows,
         } => {
-            if app_state.borrow().marked_view_id == Some(view_id) {
+            if let Some(owner_view_id) = owner_view_for_marked_pane(app_state, view_id) {
                 let show_utc_time = app_state.borrow().show_utc_time;
                 let items = rows
                     .into_iter()
@@ -1067,14 +1362,17 @@ fn apply_event(
                     .collect::<Vec<_>>();
                 {
                     let mut state = app_state.borrow_mut();
-                    state.marked_model.apply_rows(start, items.clone());
-                    state.marked_keys = items
+                    let Some(view) = state.views.get_mut(&owner_view_id) else {
+                        return;
+                    };
+                    view.panes.marked_model.apply_rows(start, items.clone());
+                    view.panes.marked_keys = items
                         .into_iter()
-                        .map(|item| (ViewId(item.origin_view_id as u64), item.row_id))
+                        .map(|item| item.row_id)
                         .collect();
                 }
-                if let Some(active_view) = app_state.borrow().active_view {
-                    if let Some(active) = app_state.borrow().views.get(&active_view) {
+                if let Some(active) = app_state.borrow().views.get(&owner_view_id) {
+                    if app_state.borrow().active_view == Some(owner_view_id) {
                         active.model.request_range(
                             active.model.current_window_start(),
                             active.model.current_window_len().max(1),
@@ -1083,20 +1381,37 @@ fn apply_event(
                 }
                 return;
             }
+            if let Some(owner_view_id) = owner_view_for_filter_pane(app_state, view_id) {
+                let show_utc_time = app_state.borrow().show_utc_time;
+                let items = rows
+                    .into_iter()
+                    .map(|row| {
+                        let origin_view_id = row
+                            .origin
+                            .as_ref()
+                            .map(|origin| origin.view_id)
+                            .unwrap_or(view_id);
+                        make_row_item(row, origin_view_id, false, show_utc_time)
+                    })
+                    .collect::<Vec<_>>();
+                {
+                    let state = app_state.borrow();
+                    if let Some(view) = state.views.get(&owner_view_id) {
+                        view.panes.filter_model.apply_rows(start, items);
+                    }
+                }
+                return;
+            }
             let is_active = {
                 let mut state = app_state.borrow_mut();
                 let show_utc_time = state.show_utc_time;
-                let marked_row_ids = state
-                    .marked_keys
-                    .iter()
-                    .filter(|(marked_view_id, _)| *marked_view_id == view_id)
-                    .map(|(_, row_id)| *row_id)
-                    .collect::<Vec<_>>();
                 if let Some(view) = state.views.get_mut(&view_id) {
                     let items = rows
                         .into_iter()
                         .map(|row| {
-                            let marked = marked_row_ids
+                            let marked = view
+                                .panes
+                                .marked_keys
                                 .contains(&(row.row_id.0.min(i32::MAX as u64) as i32));
                             make_row_item(row, view_id, marked, show_utc_time)
                         })
@@ -1120,10 +1435,45 @@ fn apply_event(
             appended,
             total_rows,
         } => {
-            if app_state.borrow().marked_view_id == Some(view_id) {
-                let state = app_state.borrow();
-                state.marked_model.update_total_rows(total_rows, appended);
-                state.marked_model.request_range(0, total_rows.max(1));
+            if let Some(owner_view_id) = owner_view_for_marked_pane(app_state, view_id) {
+                let should_show = {
+                    let mut state = app_state.borrow_mut();
+                    let Some(view) = state.views.get_mut(&owner_view_id) else {
+                        return;
+                    };
+                    let should_show =
+                        total_rows > view.panes.marked_total_rows && !view.panes.marked_pane_open;
+                    view.panes.marked_total_rows = total_rows;
+                    view.panes.marked_model.update_total_rows(total_rows, appended);
+                    view.panes.marked_model.request_range(0, total_rows.max(1));
+                    if should_show {
+                        view.panes.marked_pane_open = true;
+                    }
+                    should_show
+                };
+                if should_show && app_state.borrow().active_view == Some(owner_view_id) {
+                    reset_marked_pane_size(ui);
+                    ui.set_marked_pane_visible(true);
+                }
+                return;
+            }
+            if let Some(owner_view_id) = owner_view_for_filter_pane(app_state, view_id) {
+                {
+                    let mut state = app_state.borrow_mut();
+                    let Some(view) = state.views.get_mut(&owner_view_id) else {
+                        return;
+                    };
+                    view.panes.filter_total_rows = total_rows;
+                    view.panes.filter_model.update_total_rows(total_rows, appended);
+                    if appended > 0 {
+                        let start = view.panes.filter_model.current_window_start();
+                        let count = view.panes.filter_model.current_window_len().max(1);
+                        view.panes.filter_model.request_range(start, count);
+                    }
+                }
+                if app_state.borrow().active_view == Some(owner_view_id) {
+                    ui.set_filter_total_matches(total_rows as i32);
+                }
                 return;
             }
             let (is_active, follow_enabled, auto_scroll, model) = {
@@ -1206,7 +1556,7 @@ fn handle_view_opened(
     source_id: SourceId,
     title: String,
     kind: ViewKind,
-    query: ViewQuery,
+    _query: ViewQuery,
 ) {
     let model = Rc::new(WindowedRowsModel::new(
         cmd_tx.clone(),
@@ -1216,7 +1566,7 @@ fn handle_view_opened(
     model.set_view(view_id);
     {
         let mut state = app_state.borrow_mut();
-        state.add_view(view_id, source_id, kind, query, title.clone(), model);
+        state.add_view(view_id, source_id, title.clone(), model);
         if let Some(view) = state.views.get_mut(&view_id) {
             view.follow_enabled = matches!(kind, ViewKind::Full);
         }
@@ -1261,7 +1611,13 @@ fn activate_marked_row(
     index: usize,
 ) {
     let state = app_state.borrow();
-    let Some(entry) = state.marked_model.row_item_at(index as u32) else {
+    let Some(active_view) = state.active_view else {
+        return;
+    };
+    let Some(view) = state.views.get(&active_view) else {
+        return;
+    };
+    let Some(entry) = view.panes.marked_model.row_item_at(index as u32) else {
         return;
     };
     let _ = cmd_tx.send(EngineCommand::JumpToFullView {
@@ -1271,52 +1627,161 @@ fn activate_marked_row(
     ui.set_status_text("Jumping to marked line".into());
 }
 
-fn clear_filters(ui: &MainWindow, app_state: &Rc<RefCell<AppState>>) {
-    let (target, target_row) = {
+fn clear_filters(
+    ui: &MainWindow,
+    app_state: &Rc<RefCell<AppState>>,
+    cmd_tx: &Sender<EngineCommand>,
+) {
+    close_filter_view_for_active(app_state, cmd_tx);
+    reset_filter_controls(ui);
+    ui.set_filter_total_matches(0);
+    ui.set_selected_filter_row(-1);
+    ui.set_status_text("Cleared filter view".into());
+}
+
+fn activate_filter_row(
+    ui: &MainWindow,
+    app_state: &Rc<RefCell<AppState>>,
+    cmd_tx: &Sender<EngineCommand>,
+    index: usize,
+) {
+    let (source_view_id, row_id) = {
         let state = app_state.borrow();
         let Some(active_view) = state.active_view else {
             return;
         };
-        let Some(active) = state.views.get(&active_view) else {
+        let Some(view) = state.views.get(&active_view) else {
             return;
         };
-        let selected_row = ui.get_selected_row();
-        let target_row = if selected_row >= 0 {
-            active
-                .model
-                .row_id_at(selected_row as u32)
-                .map(|row| row as u32)
-        } else {
-            None
+        let Some(filter_view_id) = view.panes.filter_view_id else {
+            return;
         };
-        if active.kind == ViewKind::Full {
-            (Some(active_view), target_row)
-        } else {
-            (
-                state.views.iter().find_map(|(view_id, view)| {
-                    (view.source_id == active.source_id && view.kind == ViewKind::Full)
-                        .then_some(*view_id)
-                }),
-                target_row,
-            )
-        }
+        let Some(entry) = view.panes.filter_model.row_item_at(index as u32) else {
+            return;
+        };
+        (
+            filter_view_id,
+            lgx_protocol::RowId(entry.row_id.max(0) as u64),
+        )
     };
+    let _ = cmd_tx.send(EngineCommand::JumpToFullView {
+        source_view_id,
+        row_id,
+    });
+    ui.set_status_text("Jumping to filtered line".into());
+}
 
-    if let Some(view_id) = target {
-        activate_view(ui, app_state, view_id);
-        if let Some(row) = target_row {
-            if let Some(model) = app_state
-                .borrow()
-                .views
-                .get(&view_id)
-                .map(|view| view.model.clone())
-            {
-                let start = row.saturating_sub(WINDOW_SIZE / 4);
-                model.request_range(start, WINDOW_SIZE);
-                ui.set_status_text(format!("Cleared filters at row {}", row + 1).into());
-            }
-        }
+fn close_filter_view_for_active(app_state: &Rc<RefCell<AppState>>, cmd_tx: &Sender<EngineCommand>) {
+    let active_view = app_state.borrow().active_view;
+    if let Some(active_view) = active_view {
+        close_filter_view_for_owner(app_state, cmd_tx, active_view);
     }
+}
+
+fn close_filter_view_for_owner(
+    app_state: &Rc<RefCell<AppState>>,
+    cmd_tx: &Sender<EngineCommand>,
+    owner_view_id: ViewId,
+) {
+    let view_id = {
+        let mut state = app_state.borrow_mut();
+        let Some(view) = state.views.get_mut(&owner_view_id) else {
+            return;
+        };
+        view.panes.pending_filter_request = false;
+        view.panes.filter_total_rows = 0;
+        view.panes.filter_query = ViewQuery::default();
+        view.panes.filter_model.clear();
+        view.panes.filter_view_id.take()
+    };
+    if let Some(view_id) = view_id {
+        let _ = cmd_tx.send(EngineCommand::CloseView { view_id });
+    }
+}
+
+fn build_filter_query(ui: &MainWindow) -> ViewQuery {
+    let severity_mask = severity_mask_from_ui(ui);
+    let text = ui.get_filter_text().trim().to_string();
+    ViewQuery {
+        severity_mask,
+        min_severity: None,
+        max_severity: None,
+        required_flags: 0,
+        text: (!text.is_empty()).then_some(text),
+        text_is_regex: ui.get_filter_text_regex(),
+        text_message_only: ui.get_filter_text_message_only(),
+        text_case_insensitive: ui.get_filter_text_icase(),
+    }
+}
+
+fn severity_mask_from_ui(ui: &MainWindow) -> Option<u8> {
+    let states = [
+        ui.get_filter_sev_trace(),
+        ui.get_filter_sev_debug(),
+        ui.get_filter_sev_info(),
+        ui.get_filter_sev_warn(),
+        ui.get_filter_sev_error(),
+        ui.get_filter_sev_fatal(),
+    ];
+    if states.iter().all(|checked| *checked) {
+        return None;
+    }
+    Some(
+        states
+            .into_iter()
+            .enumerate()
+            .fold(
+                0u8,
+                |mask, (index, checked)| {
+                    if checked {
+                        mask | (1u8 << index)
+                    } else {
+                        mask
+                    }
+                },
+            ),
+    )
+}
+
+fn sync_filter_controls(ui: &MainWindow, query: &ViewQuery) {
+    let severity_mask = query.severity_mask.or_else(|| {
+        query.min_severity.map(|min| {
+            let mut mask = 0u8;
+            for sev in min..=6 {
+                mask |= 1u8 << (sev - 1);
+            }
+            mask
+        })
+    });
+    let has_severity_filter = severity_mask.is_some();
+    ui.set_filter_sev_trace(!has_severity_filter || severity_selected(severity_mask, 1));
+    ui.set_filter_sev_debug(!has_severity_filter || severity_selected(severity_mask, 2));
+    ui.set_filter_sev_info(!has_severity_filter || severity_selected(severity_mask, 3));
+    ui.set_filter_sev_warn(!has_severity_filter || severity_selected(severity_mask, 4));
+    ui.set_filter_sev_error(!has_severity_filter || severity_selected(severity_mask, 5));
+    ui.set_filter_sev_fatal(!has_severity_filter || severity_selected(severity_mask, 6));
+    ui.set_filter_text(query.text.clone().unwrap_or_default().into());
+    ui.set_filter_text_regex(query.text_is_regex);
+    ui.set_filter_text_message_only(query.text_message_only);
+    ui.set_filter_text_icase(query.text_case_insensitive);
+}
+
+fn severity_selected(mask: Option<u8>, sev: u8) -> bool {
+    mask.map(|value| value & (1u8 << (sev - 1)) != 0)
+        .unwrap_or(true)
+}
+
+fn reset_filter_controls(ui: &MainWindow) {
+    ui.set_filter_sev_trace(true);
+    ui.set_filter_sev_debug(true);
+    ui.set_filter_sev_info(true);
+    ui.set_filter_sev_warn(true);
+    ui.set_filter_sev_error(true);
+    ui.set_filter_sev_fatal(true);
+    ui.set_filter_text(SharedString::default());
+    ui.set_filter_text_regex(false);
+    ui.set_filter_text_message_only(false);
+    ui.set_filter_text_icase(false);
 }
 
 #[cfg(test)]

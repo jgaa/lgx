@@ -28,6 +28,439 @@ export struct RecentFileItem {
     exists: bool,
 }
 
+component LogPanel inherits Rectangle {
+    in property <[RowItem]> items;
+    in-out property <int> selected_row: -1;
+    in property <bool> colorize;
+    in property <bool> busy;
+    in property <[TabItem]> tabs;
+    in-out property <length> viewport_y: 0px;
+    callback toggle_mark_row(int);
+
+    function severity_color(sev: int) -> color {
+        if (sev == 5) { return #C0392B; }
+        if (sev == 4) { return #D98C00; }
+        if (sev == 6) { return #8B0000; }
+        if (sev == 3) { return #1F3A5F; }
+        if (sev == 2) { return #0F8B8D; }
+        if (sev == 1) { return #6C6C6C; }
+        return #000000;
+    }
+
+    background: #FFFFFF;
+    border-color: #D3D3D3;
+    border-width: 1px;
+    clip: true;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    ListView {
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+        viewport-y <=> root.viewport_y;
+        for item[i] in root.items: Rectangle {
+            height: 28px;
+            background: root.selected_row == i ? #DCEBFF : #FFFFFF;
+
+            row_touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                clicked => {
+                    root.selected_row = i;
+                }
+            }
+
+            HorizontalBox {
+                spacing: 6px;
+                horizontal-stretch: 1;
+
+                CheckBox {
+                    width: 22px;
+                    height: parent.height;
+                    text: "";
+                    checked: item.marked;
+                    toggled => {
+                        root.toggle_mark_row(i);
+                    }
+                }
+
+                Text {
+                    width: 64px;
+                    height: parent.height;
+                    text: (item.row_id + 1);
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    font-family: "monospace";
+                    color: #666666;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: parent.height;
+                    clip: true;
+
+                    Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: item.text;
+                        color: root.colorize ? root.severity_color(item.sev) : #000000;
+                        font-family: "monospace";
+                        vertical-alignment: center;
+                        wrap: no-wrap;
+                        overflow: clip;
+                    }
+                }
+            }
+        }
+    }
+
+    if (root.tabs.length == 0 && !root.busy) : Rectangle {
+        background: transparent;
+        width: parent.width;
+        height: parent.height;
+
+        VerticalBox {
+            x: 24px;
+            y: 24px;
+            width: parent.width - 48px;
+            height: parent.height - 48px;
+            spacing: 8px;
+
+            Text {
+                text: "No log is open";
+                color: #333333;
+            }
+
+            Text {
+                text: "Use File > Open File..., File > Recent, or File > Docker to load logs.";
+                color: #666666;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+component MarkedPanel inherits Rectangle {
+    in property <[RowItem]> items;
+    in-out property <int> selected_row: -1;
+    in property <bool> colorize;
+    callback activate_row(int);
+    callback close_requested();
+
+    function severity_color(sev: int) -> color {
+        if (sev == 5) { return #C0392B; }
+        if (sev == 4) { return #D98C00; }
+        if (sev == 6) { return #8B0000; }
+        if (sev == 3) { return #1F3A5F; }
+        if (sev == 2) { return #0F8B8D; }
+        if (sev == 1) { return #6C6C6C; }
+        return #000000;
+    }
+
+    background: #FAFAFA;
+    border-color: #D3D3D3;
+    border-width: 1px;
+    clip: true;
+    vertical-stretch: 1;
+
+    close_hotspot := TouchArea {
+        x: parent.width - 32px;
+        y: 0px;
+        width: 32px;
+        height: 32px;
+        clicked => {
+            root.close_requested();
+        }
+    }
+
+    VerticalBox {
+        padding: 8px;
+        spacing: 6px;
+
+        Text {
+            text: "Marked";
+            color: #444444;
+        }
+
+        ListView {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            for item[i] in root.items: Rectangle {
+                height: 28px;
+                background: root.selected_row == i ? #DCEBFF : #FFFFFF;
+
+                marked_touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => {
+                        root.selected_row = i;
+                        root.activate_row(i);
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 6px;
+                    horizontal-stretch: 1;
+
+                    Text {
+                        width: 64px;
+                        height: parent.height;
+                        text: (item.row_id + 1);
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        font-family: "monospace";
+                        color: #666666;
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: parent.height;
+                        clip: true;
+
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: item.text;
+                            color: root.colorize ? root.severity_color(item.sev) : #000000;
+                            font-family: "monospace";
+                            vertical-alignment: center;
+                            wrap: no-wrap;
+                            overflow: clip;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: parent.width - 24px;
+        y: 6px;
+        width: 18px;
+        height: 18px;
+        opacity: close_hotspot.has-hover ? 1 : 0;
+        border-width: 1px;
+        border-color: close_hotspot.has-hover ? #B94A48 : #C8C8C8;
+        background: close_hotspot.has-hover ? #FBE3E1 : #F2F2F2;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "x";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: close_hotspot.has-hover ? #8B0000 : #666666;
+        }
+    }
+}
+
+component FilterPanel inherits Rectangle {
+    in property <[RowItem]> items;
+    in-out property <int> selected_row: -1;
+    in property <bool> colorize;
+    in property <int> total_matches: 0;
+    in-out property <string> filter_text: "";
+    in-out property <bool> filter_text_regex: false;
+    in-out property <bool> filter_text_message_only: false;
+    in-out property <bool> filter_text_icase: false;
+    in-out property <bool> sev_trace: true;
+    in-out property <bool> sev_debug: true;
+    in-out property <bool> sev_info: true;
+    in-out property <bool> sev_warn: true;
+    in-out property <bool> sev_error: true;
+    in-out property <bool> sev_fatal: true;
+    callback apply_requested();
+    callback clear_requested();
+    callback activate_row(int);
+    callback close_requested();
+
+    property <bool> severity_popup_open: false;
+
+    background: #FAFAFA;
+    border-color: #D3D3D3;
+    border-width: 1px;
+    clip: true;
+    vertical-stretch: 1;
+
+    function severity_color(sev: int) -> color {
+        if (sev == 5) { return #C0392B; }
+        if (sev == 4) { return #D98C00; }
+        if (sev == 6) { return #8B0000; }
+        if (sev == 3) { return #1F3A5F; }
+        if (sev == 2) { return #0F8B8D; }
+        if (sev == 1) { return #6C6C6C; }
+        return #000000;
+    }
+
+    close_hotspot := TouchArea {
+        x: parent.width - 32px;
+        y: 0px;
+        width: 32px;
+        height: 32px;
+        clicked => {
+            root.close_requested();
+        }
+    }
+
+    VerticalBox {
+        padding: 8px;
+        spacing: 8px;
+
+        Text {
+            text: "Filter";
+            color: #444444;
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+
+            Button {
+                width: 90px;
+                text: "Severity";
+                clicked => {
+                    root.severity_popup_open = !root.severity_popup_open;
+                }
+            }
+
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.filter_text;
+                placeholder-text: "Text filter";
+                accepted => {
+                    root.apply_requested();
+                }
+            }
+        }
+
+        if (root.severity_popup_open) : Rectangle {
+            border-color: #D3D3D3;
+            border-width: 1px;
+            background: #FFFFFF;
+
+            VerticalBox {
+                padding: 8px;
+                spacing: 4px;
+
+                CheckBox { text: "Trace"; checked <=> root.sev_trace; }
+                CheckBox { text: "Debug"; checked <=> root.sev_debug; }
+                CheckBox { text: "Info"; checked <=> root.sev_info; }
+                CheckBox { text: "Warn"; checked <=> root.sev_warn; }
+                CheckBox { text: "Error"; checked <=> root.sev_error; }
+                CheckBox { text: "Fatal"; checked <=> root.sev_fatal; }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+
+            CheckBox { text: "regex"; checked <=> root.filter_text_regex; }
+            CheckBox { text: "msg"; checked <=> root.filter_text_message_only; }
+            CheckBox { text: "icase"; checked <=> root.filter_text_icase; }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Clear";
+                clicked => {
+                    root.clear_requested();
+                }
+            }
+
+            Button {
+                text: "Apply";
+                clicked => {
+                    root.apply_requested();
+                }
+            }
+        }
+
+        Text {
+            text: root.total_matches == 1 ? "1 match" : root.total_matches + " matches";
+            color: #666666;
+        }
+
+        Rectangle {
+            border-color: #D3D3D3;
+            border-width: 1px;
+            background: #FFFFFF;
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+
+            ListView {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                for item[i] in root.items: Rectangle {
+                    height: 28px;
+                    background: root.selected_row == i ? #DCEBFF : #FFFFFF;
+
+                    filter_touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => {
+                            root.selected_row = i;
+                            root.activate_row(i);
+                        }
+                    }
+
+                    HorizontalBox {
+                        spacing: 6px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            width: 64px;
+                            height: parent.height;
+                            text: (item.row_id + 1);
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            font-family: "monospace";
+                            color: #666666;
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: parent.height;
+                            clip: true;
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: item.text;
+                                color: root.colorize ? root.severity_color(item.sev) : #000000;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                                wrap: no-wrap;
+                                overflow: clip;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: parent.width - 24px;
+        y: 6px;
+        width: 18px;
+        height: 18px;
+        opacity: close_hotspot.has-hover ? 1 : 0;
+        border-width: 1px;
+        border-color: close_hotspot.has-hover ? #B94A48 : #C8C8C8;
+        background: close_hotspot.has-hover ? #FBE3E1 : #F2F2F2;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "x";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: close_hotspot.has-hover ? #8B0000 : #666666;
+        }
+    }
+}
+
 export component MainWindow inherits Window {
     title: "LGX";
     preferred-width: 900px;
@@ -40,6 +473,7 @@ export component MainWindow inherits Window {
     in-out property <[TabItem]> tabs: [];
     in-out property <[DockerContainerItem]> docker_containers: [];
     in-out property <[RecentFileItem]> recent_files: [];
+    in-out property <[RowItem]> filter_items: [];
     in property <string> status_text: "";
     in property <string> perf_text: "";
     in property <bool> busy: false;
@@ -49,17 +483,33 @@ export component MainWindow inherits Window {
     in-out property <bool> auto_scroll: true;
     in-out property <bool> colorize: true;
     in-out property <bool> show_utc_time: false;
-    in property <int> filter_min_severity: -1;
-    in property <bool> filter_has_timestamp: false;
-    in property <bool> filter_has_severity: false;
+    in-out property <string> filter_text: "";
+    in-out property <bool> filter_text_regex: false;
+    in-out property <bool> filter_text_message_only: false;
+    in-out property <bool> filter_text_icase: false;
+    in-out property <bool> filter_sev_trace: true;
+    in-out property <bool> filter_sev_debug: true;
+    in-out property <bool> filter_sev_info: true;
+    in-out property <bool> filter_sev_warn: true;
+    in-out property <bool> filter_sev_error: true;
+    in-out property <bool> filter_sev_fatal: true;
     in property <string> new_lines_text: "";
+    in-out property <length> log_viewport_y: 0px;
     in-out property <int> selected_row: -1;
     in-out property <int> selected_marked_row: -1;
+    in-out property <int> selected_filter_row: -1;
     in-out property <bool> marked_pane_visible: false;
     in-out property <bool> goto_dialog_open: false;
     in-out property <bool> open_file_dialog_open: false;
     in-out property <bool> recent_dialog_open: false;
     in-out property <bool> docker_panel_visible: false;
+    in-out property <bool> filter_pane_visible: false;
+    in-out property <length> marked_pane_width: 300px;
+    in-out property <length> marked_pane_height: 220px;
+    in-out property <length> filter_pane_width: 320px;
+    in-out property <length> filter_pane_height: 180px;
+    in property <int> filter_total_matches: 0;
+    in-out property <bool> vertical_split: false;
 
     callback open_file(string);
     callback jump_to(string);
@@ -67,12 +517,14 @@ export component MainWindow inherits Window {
     callback set_auto_scroll(bool);
     callback set_show_utc_time(bool);
     callback activate_tab(int);
-    callback apply_filters(int, bool, bool);
+    callback apply_filters();
     callback jump_to_full_view();
     callback toggle_mark_row(int);
     callback activate_marked_row(int);
+    callback activate_filter_row(int);
     callback clear_filters();
-    callback toggle_marked_pane();
+    callback set_marked_pane_visible(bool);
+    callback set_filter_pane_visible(bool);
     callback open_open_file_dialog();
     callback close_open_file_dialog();
     callback open_recent_dialog();
@@ -84,6 +536,7 @@ export component MainWindow inherits Window {
     callback close_goto_dialog();
     callback refresh_docker();
     callback open_docker_container(string, string);
+    callback set_vertical_split(bool);
 
     function severity_color(sev: int) -> color {
         if (sev == 5) { return #C0392B; }
@@ -177,11 +630,11 @@ export component MainWindow inherits Window {
             }
 
             MenuItem {
-                title: "Marked Lines";
+                title: "Vertical Split";
                 checkable: true;
-                checked: root.marked_pane_visible;
+                checked: root.vertical_split;
                 activated => {
-                    root.toggle_marked_pane();
+                    root.set_vertical_split(!root.vertical_split);
                 }
             }
 
@@ -194,66 +647,27 @@ export component MainWindow inherits Window {
         }
 
         Menu {
-            title: "Filters";
+            title: "Views";
 
             MenuItem {
-                title: "All Rows";
+                title: "Filter";
                 checkable: true;
-                checked: root.filter_min_severity < 0 && !root.filter_has_timestamp && !root.filter_has_severity;
+                checked: root.filter_pane_visible;
                 activated => {
-                    root.clear_filters();
-                }
-            }
-
-            MenuSeparator {}
-
-            MenuItem {
-                title: "Info+";
-                checkable: true;
-                checked: root.filter_min_severity == 3;
-                activated => {
-                    root.apply_filters(3, root.filter_has_timestamp, root.filter_has_severity);
+                    root.set_filter_pane_visible(!root.filter_pane_visible);
                 }
             }
 
             MenuItem {
-                title: "Warn+";
+                title: "Marked";
                 checkable: true;
-                checked: root.filter_min_severity == 4;
+                checked: root.marked_pane_visible;
                 activated => {
-                    root.apply_filters(4, root.filter_has_timestamp, root.filter_has_severity);
-                }
-            }
-
-            MenuItem {
-                title: "Error+";
-                checkable: true;
-                checked: root.filter_min_severity == 5;
-                activated => {
-                    root.apply_filters(5, root.filter_has_timestamp, root.filter_has_severity);
-                }
-            }
-
-            MenuSeparator {}
-
-            MenuItem {
-                title: "Has Timestamp";
-                checkable: true;
-                checked: root.filter_has_timestamp;
-                activated => {
-                    root.apply_filters(root.filter_min_severity, !root.filter_has_timestamp, root.filter_has_severity);
-                }
-            }
-
-            MenuItem {
-                title: "Has Severity";
-                checkable: true;
-                checked: root.filter_has_severity;
-                activated => {
-                    root.apply_filters(root.filter_min_severity, root.filter_has_timestamp, !root.filter_has_severity);
+                    root.set_marked_pane_visible(!root.marked_pane_visible);
                 }
             }
         }
+
     }
 
     app_focus := FocusScope {
@@ -271,257 +685,352 @@ export component MainWindow inherits Window {
         }
 
         VerticalBox {
-            padding: 12px;
-            spacing: 10px;
+            padding: 0px;
+            spacing: 0px;
 
-        HorizontalBox {
-            spacing: 6px;
+            if (root.tabs.length > 0 || root.busy) : HorizontalBox {
+                spacing: 6px;
 
-            for tab[index] in root.tabs: Rectangle {
-                height: 30px;
-                min-width: 120px;
-                background: tab.active ? #DCEBFF : #ECECEC;
-                border-color: tab.active ? #7AA9E6 : #C8C8C8;
-                border-width: 1px;
+                for tab[index] in root.tabs: Rectangle {
+                    height: 30px;
+                    min-width: 120px;
+                    background: tab.active ? #DCEBFF : #ECECEC;
+                    border-color: tab.active ? #7AA9E6 : #C8C8C8;
+                    border-width: 1px;
 
-                tab_touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-                    clicked => {
-                        root.activate_tab(index);
+                    tab_touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => {
+                            root.activate_tab(index);
+                        }
+                    }
+
+                    Text {
+                        x: 10px;
+                        horizontal-stretch: 1;
+                        text: tab.title;
+                        overflow: elide;
+                        vertical-alignment: center;
                     }
                 }
 
                 Text {
-                    x: 10px;
-                    horizontal-stretch: 1;
-                    text: tab.title;
-                    overflow: elide;
+                    text: root.busy ? "Indexing..." : "";
                     vertical-alignment: center;
                 }
             }
 
-            Text {
-                text: root.busy ? "Indexing..." : "";
-                vertical-alignment: center;
-            }
-        }
-
-        if (root.docker_panel_visible) : Rectangle {
-            background: #F7F7F7;
-            border-color: #D3D3D3;
-            border-width: 1px;
-            height: 180px;
-
-            VerticalBox {
-                padding: 8px;
-                spacing: 6px;
-
-                HorizontalBox {
-                    spacing: 8px;
-
-                    Text {
-                        text: "Docker Containers";
-                    }
-
-                    Button {
-                        text: "Refresh";
-                        clicked => {
-                            root.refresh_docker();
-                        }
-                    }
-                }
-
-                ListView {
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
-                    for container[i] in root.docker_containers: Rectangle {
-                        height: 30px;
-
-                        HorizontalBox {
-                            spacing: 8px;
-                            horizontal-stretch: 1;
-
-                            Text {
-                                min-width: 140px;
-                                text: container.name;
-                                height: parent.height;
-                                vertical-alignment: center;
-                            }
-
-                            Text {
-                                min-width: 180px;
-                                text: container.image;
-                                height: parent.height;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-
-                            Text {
-                                min-width: 160px;
-                                text: container.status;
-                                height: parent.height;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-
-                            Button {
-                                height: parent.height;
-                                text: "Open";
-                                clicked => {
-                                    root.open_docker_container(container.id, container.name);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        HorizontalBox {
-            spacing: 10px;
-            horizontal-stretch: 1;
-            vertical-stretch: 1;
-
-            log_panel := Rectangle {
-                background: #FFFFFF;
+            if (root.docker_panel_visible) : Rectangle {
+                background: #F7F7F7;
                 border-color: #D3D3D3;
                 border-width: 1px;
-                clip: true;
-                horizontal-stretch: 1;
-                vertical-stretch: 1;
+                height: 180px;
 
-                log_view := ListView {
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
-                    for item[i] in root.items: Rectangle {
-                        height: 28px;
-                        background: root.selected_row == i ? #DCEBFF : #FFFFFF;
-
-                        row_touch := TouchArea {
-                            width: parent.width;
-                            height: parent.height;
-                            clicked => {
-                                root.selected_row = i;
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 6px;
-                            horizontal-stretch: 1;
-
-                            CheckBox {
-                                width: 22px;
-                                height: parent.height;
-                                text: "";
-                                checked: item.marked;
-                                toggled => {
-                                    root.toggle_mark_row(i);
-                                }
-                            }
-
-                            Text {
-                                width: 64px;
-                                height: parent.height;
-                                text: (item.row_id + 1);
-                                horizontal-alignment: right;
-                                vertical-alignment: center;
-                                font-family: "monospace";
-                                color: #666666;
-                            }
-
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                height: parent.height;
-                                clip: true;
-
-                                Text {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    text: item.text;
-                                    color: root.colorize ? root.severity_color(item.sev) : #000000;
-                                    font-family: "monospace";
-                                    vertical-alignment: center;
-                                    wrap: no-wrap;
-                                    overflow: clip;
-                                }
-                            }
-                        }
+                docker_close_hotspot := TouchArea {
+                    x: parent.width - 32px;
+                    y: 0px;
+                    width: 32px;
+                    height: 32px;
+                    clicked => {
+                        root.docker_panel_visible = false;
                     }
                 }
-            }
-
-            if (root.marked_pane_visible) : Rectangle {
-                background: #FAFAFA;
-                border-color: #D3D3D3;
-                border-width: 1px;
-                clip: true;
-                width: 300px;
-                vertical-stretch: 1;
 
                 VerticalBox {
                     padding: 8px;
                     spacing: 6px;
 
-                    Text {
-                        text: "Marked";
-                        color: #444444;
+                    HorizontalBox {
+                        spacing: 8px;
+
+                        Text {
+                            text: "Docker Containers";
+                        }
+
+                        Button {
+                            text: "Refresh";
+                            clicked => {
+                                root.refresh_docker();
+                            }
+                        }
                     }
 
                     ListView {
                         horizontal-stretch: 1;
                         vertical-stretch: 1;
-                        for item[i] in root.marked_items: Rectangle {
-                            height: 28px;
-                            background: root.selected_marked_row == i ? #DCEBFF : #FFFFFF;
-
-                            marked_touch := TouchArea {
-                                width: parent.width;
-                                height: parent.height;
-                                clicked => {
-                                    root.selected_marked_row = i;
-                                    root.activate_marked_row(i);
-                                }
-                            }
+                        for container[i] in root.docker_containers: Rectangle {
+                            height: 30px;
 
                             HorizontalBox {
-                                spacing: 6px;
+                                spacing: 8px;
                                 horizontal-stretch: 1;
 
                                 Text {
-                                    width: 64px;
+                                    min-width: 140px;
+                                    text: container.name;
                                     height: parent.height;
-                                    text: (item.row_id + 1);
-                                    horizontal-alignment: right;
                                     vertical-alignment: center;
-                                    font-family: "monospace";
-                                    color: #666666;
                                 }
 
-                                Rectangle {
-                                    horizontal-stretch: 1;
+                                Text {
+                                    min-width: 180px;
+                                    text: container.image;
                                     height: parent.height;
-                                    clip: true;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
 
-                                    Text {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        text: item.text;
-                                        color: root.colorize ? root.severity_color(item.sev) : #000000;
-                                        font-family: "monospace";
-                                        vertical-alignment: center;
-                                        wrap: no-wrap;
-                                        overflow: clip;
+                                Text {
+                                    min-width: 160px;
+                                    text: container.status;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+
+                                Button {
+                                    height: parent.height;
+                                    text: "Open";
+                                    clicked => {
+                                        root.open_docker_container(container.id, container.name);
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
-        }
 
-        if (root.open_file_dialog_open) : Rectangle {
+                Rectangle {
+                    x: parent.width - 24px;
+                    y: 6px;
+                    width: 18px;
+                    height: 18px;
+                    opacity: docker_close_hotspot.has-hover ? 1 : 0;
+                    border-width: 1px;
+                    border-color: docker_close_hotspot.has-hover ? #B94A48 : #C8C8C8;
+                    background: docker_close_hotspot.has-hover ? #FBE3E1 : #F2F2F2;
+
+                    Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "x";
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        color: docker_close_hotspot.has-hover ? #8B0000 : #666666;
+                    }
+                }
+            }
+
+            if (!root.vertical_split) : HorizontalBox {
+                spacing: 10px;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+
+                LogPanel {
+                    items: root.items;
+                    selected_row <=> root.selected_row;
+                    colorize: root.colorize;
+                    busy: root.busy;
+                    tabs: root.tabs;
+                    viewport_y <=> root.log_viewport_y;
+                    toggle_mark_row(row) => {
+                        root.toggle_mark_row(row);
+                    }
+                }
+
+                if (root.marked_pane_visible) : Rectangle {
+                    width: 8px;
+                    vertical-stretch: 1;
+                    background: resize_handle_h.has-hover || resize_handle_h.pressed ? #B9D3F5 : #D3D3D3;
+
+                    resize_handle_h := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: ew-resize;
+                        moved => {
+                            if (self.pressed) {
+                                root.marked_pane_width = max(
+                                    180px,
+                                    root.marked_pane_width - (self.mouse-x - self.pressed-x)
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if (root.marked_pane_visible) : MarkedPanel {
+                    items: root.marked_items;
+                    selected_row <=> root.selected_marked_row;
+                    colorize: root.colorize;
+                    min-width: 180px;
+                    preferred-width: max(180px, root.marked_pane_width);
+                    activate_row(row) => {
+                        root.activate_marked_row(row);
+                    }
+                    close_requested() => {
+                        root.set_marked_pane_visible(false);
+                    }
+                }
+
+                if (root.filter_pane_visible) : Rectangle {
+                    width: 8px;
+                    vertical-stretch: 1;
+                    background: filter_resize_handle_h.has-hover || filter_resize_handle_h.pressed ? #B9D3F5 : #D3D3D3;
+
+                    filter_resize_handle_h := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: ew-resize;
+                        moved => {
+                            if (self.pressed) {
+                                root.filter_pane_width = max(
+                                    220px,
+                                    root.filter_pane_width - (self.mouse-x - self.pressed-x)
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if (root.filter_pane_visible) : FilterPanel {
+                    items: root.filter_items;
+                    selected_row <=> root.selected_filter_row;
+                    colorize: root.colorize;
+                    total_matches: root.filter_total_matches;
+                    filter_text <=> root.filter_text;
+                    filter_text_regex <=> root.filter_text_regex;
+                    filter_text_message_only <=> root.filter_text_message_only;
+                    filter_text_icase <=> root.filter_text_icase;
+                    sev_trace <=> root.filter_sev_trace;
+                    sev_debug <=> root.filter_sev_debug;
+                    sev_info <=> root.filter_sev_info;
+                    sev_warn <=> root.filter_sev_warn;
+                    sev_error <=> root.filter_sev_error;
+                    sev_fatal <=> root.filter_sev_fatal;
+                    min-width: 220px;
+                    preferred-width: max(220px, root.filter_pane_width);
+                    apply_requested() => {
+                        root.apply_filters();
+                    }
+                    clear_requested() => {
+                        root.clear_filters();
+                    }
+                    activate_row(row) => {
+                        root.activate_filter_row(row);
+                    }
+                    close_requested() => {
+                        root.set_filter_pane_visible(false);
+                    }
+                }
+            }
+
+            if (root.vertical_split) : VerticalBox {
+                spacing: 10px;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+
+                LogPanel {
+                    items: root.items;
+                    selected_row <=> root.selected_row;
+                    colorize: root.colorize;
+                    busy: root.busy;
+                    tabs: root.tabs;
+                    viewport_y <=> root.log_viewport_y;
+                    toggle_mark_row(row) => {
+                        root.toggle_mark_row(row);
+                    }
+                }
+
+                if (root.marked_pane_visible) : Rectangle {
+                    height: 8px;
+                    horizontal-stretch: 1;
+                    background: resize_handle_v.has-hover || resize_handle_v.pressed ? #B9D3F5 : #D3D3D3;
+
+                    resize_handle_v := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: ns-resize;
+                        moved => {
+                            if (self.pressed) {
+                                root.marked_pane_height = max(
+                                    120px,
+                                    root.marked_pane_height - (self.mouse-y - self.pressed-y)
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if (root.marked_pane_visible) : MarkedPanel {
+                    items: root.marked_items;
+                    selected_row <=> root.selected_marked_row;
+                    colorize: root.colorize;
+                    min-height: 120px;
+                    preferred-height: max(120px, root.marked_pane_height);
+                    horizontal-stretch: 1;
+                    activate_row(row) => {
+                        root.activate_marked_row(row);
+                    }
+                    close_requested() => {
+                        root.set_marked_pane_visible(false);
+                    }
+                }
+
+                if (root.filter_pane_visible) : Rectangle {
+                    height: 8px;
+                    horizontal-stretch: 1;
+                    background: filter_resize_handle_v.has-hover || filter_resize_handle_v.pressed ? #B9D3F5 : #D3D3D3;
+
+                    filter_resize_handle_v := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: ns-resize;
+                        moved => {
+                            if (self.pressed) {
+                                root.filter_pane_height = max(
+                                    120px,
+                                    root.filter_pane_height - (self.mouse-y - self.pressed-y)
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if (root.filter_pane_visible) : FilterPanel {
+                    items: root.filter_items;
+                    selected_row <=> root.selected_filter_row;
+                    colorize: root.colorize;
+                    total_matches: root.filter_total_matches;
+                    filter_text <=> root.filter_text;
+                    filter_text_regex <=> root.filter_text_regex;
+                    filter_text_message_only <=> root.filter_text_message_only;
+                    filter_text_icase <=> root.filter_text_icase;
+                    sev_trace <=> root.filter_sev_trace;
+                    sev_debug <=> root.filter_sev_debug;
+                    sev_info <=> root.filter_sev_info;
+                    sev_warn <=> root.filter_sev_warn;
+                    sev_error <=> root.filter_sev_error;
+                    sev_fatal <=> root.filter_sev_fatal;
+                    min-height: 120px;
+                    preferred-height: max(120px, root.filter_pane_height);
+                    horizontal-stretch: 1;
+                    apply_requested() => {
+                        root.apply_filters();
+                    }
+                    clear_requested() => {
+                        root.clear_filters();
+                    }
+                    activate_row(row) => {
+                        root.activate_filter_row(row);
+                    }
+                    close_requested() => {
+                        root.set_filter_pane_visible(false);
+                    }
+                }
+            }
+
+            if (root.open_file_dialog_open) : Rectangle {
             background: #F7F7F7;
             border-color: #C8C8C8;
             border-width: 1px;
@@ -557,9 +1066,9 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-        }
+            }
 
-        if (root.recent_dialog_open) : Rectangle {
+            if (root.recent_dialog_open) : Rectangle {
             background: #F7F7F7;
             border-color: #C8C8C8;
             border-width: 1px;
@@ -647,9 +1156,9 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-        }
+            }
 
-        if (root.goto_dialog_open) : Rectangle {
+            if (root.goto_dialog_open) : Rectangle {
             background: #F7F7F7;
             border-color: #C8C8C8;
             border-width: 1px;
@@ -685,7 +1194,7 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-        }
+            }
 
             Text {
                 text: root.status_text;

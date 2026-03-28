@@ -51,14 +51,27 @@ pub struct ViewInfo {
 
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct ViewQuery {
+    pub severity_mask: Option<u8>,
     pub min_severity: Option<u8>,
     pub max_severity: Option<u8>,
     pub required_flags: u8,
+    pub text: Option<String>,
+    pub text_is_regex: bool,
+    pub text_message_only: bool,
+    pub text_case_insensitive: bool,
 }
 
 impl ViewQuery {
     pub fn is_empty(&self) -> bool {
-        self.min_severity.is_none() && self.max_severity.is_none() && self.required_flags == 0
+        self.severity_mask.is_none()
+            && self.min_severity.is_none()
+            && self.max_severity.is_none()
+            && self.required_flags == 0
+            && self
+                .text
+                .as_ref()
+                .map(|text| text.is_empty())
+                .unwrap_or(true)
     }
 }
 

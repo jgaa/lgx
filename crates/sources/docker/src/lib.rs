@@ -5,6 +5,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use lgx_core::{RowId, RowRender, SourceId, SourceInfo, SourceKind, SourceLocator, ViewQuery};
 use lgx_parsing::{MetaParser, ParserKind, ParserSelector};
 use lgx_source_api::{LogSource, SourceError, SourceRows, SourceUpdate};
+use regex::RegexBuilder;
 use serde::Deserialize;
 
 const DOCKER_SOCKET: &str = "/var/run/docker.sock";
@@ -221,8 +222,12 @@ impl LogSource for DockerLogSource {
         let end = end.unwrap_or(self.total_rows()) as usize;
         let end = end.min(self.rows.len());
         let mut row_ids = Vec::new();
+        let regex = compile_query_regex(query);
         for index in start..end {
             let row = &self.rows[index];
+            if !severity_matches(query, row.sev) {
+                continue;
+            }
             if let Some(min) = query.min_severity {
                 if row.sev < min {
                     continue;
@@ -235,6 +240,10 @@ impl LogSource for DockerLogSource {
             }
             if query.required_flags != 0 && row.flags & query.required_flags != query.required_flags
             {
+                continue;
+            }
+            let message_text = self.parser.message_text(row.text.as_bytes());
+            if !text_matches(query, message_text, row.text.as_str(), regex.as_ref()) {
                 continue;
             }
             row_ids.push(RowId(index as u64));
@@ -274,6 +283,62 @@ impl LogSource for DockerLogSource {
             scan_duration: scan_start.elapsed(),
         }))
     }
+}
+
+fn severity_matches(query: &ViewQuery, sev: u8) -> bool {
+    match query.severity_mask {
+        Some(mask) => severity_bit(sev)
+            .map(|bit| mask & bit != 0)
+            .unwrap_or(false),
+        None => true,
+    }
+}
+
+fn severity_bit(sev: u8) -> Option<u8> {
+    if (1..=7).contains(&sev) {
+        Some(1u8 << (sev - 1))
+    } else {
+        None
+    }
+}
+
+fn compile_query_regex(query: &ViewQuery) -> Option<regex::Regex> {
+    let pattern = query.text.as_deref()?;
+    if pattern.is_empty() || !query.text_is_regex {
+        return None;
+    }
+    RegexBuilder::new(pattern)
+        .case_insensitive(query.text_case_insensitive)
+        .build()
+        .ok()
+}
+
+fn text_matches(
+    query: &ViewQuery,
+    message_text: &[u8],
+    raw_text: &str,
+    regex: Option<&regex::Regex>,
+) -> bool {
+    let Some(pattern) = query.text.as_deref() else {
+        return true;
+    };
+    if pattern.is_empty() {
+        return true;
+    }
+    let target = if query.text_message_only {
+        String::from_utf8_lossy(message_text).into_owned()
+    } else {
+        raw_text.to_string()
+    };
+    if query.text_is_regex {
+        return regex
+            .map(|compiled| compiled.is_match(&target))
+            .unwrap_or(false);
+    }
+    if query.text_case_insensitive {
+        return target.to_lowercase().contains(&pattern.to_lowercase());
+    }
+    target.contains(pattern)
 }
 
 fn overlap_len(existing: &[DockerRow], incoming: &[String]) -> usize {
