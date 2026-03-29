@@ -1,0 +1,280 @@
+#include "UiSettings.h"
+
+#include <QColor>
+#include <QFontDatabase>
+#include <QSettings>
+
+#include <algorithm>
+#include <array>
+
+namespace lgx {
+namespace {
+
+constexpr auto kLogFontFamilyKey = "ui/log/fontFamily";
+constexpr auto kLogBaseFontPixelSizeKey = "ui/log/baseFontPixelSize";
+constexpr auto kLogZoomPercentKey = "ui/log/zoomPercent";
+constexpr auto kFollowLiveLogsByDefaultKey = "ui/log/followLiveLogsByDefault";
+constexpr int kDefaultLogBaseFontPixelSize = 13;
+constexpr int kMinLogBaseFontPixelSize = 8;
+constexpr int kMaxLogBaseFontPixelSize = 36;
+constexpr int kDefaultLogZoomPercent = 100;
+constexpr int kMinLogZoomPercent = 50;
+constexpr int kMaxLogZoomPercent = 400;
+constexpr int kLogZoomStepPercent = 10;
+
+struct LogLevelStyleDefinition {
+  LogLevel level;
+  const char* key;
+  const char* name;
+  const char* foreground;
+  const char* background;
+};
+
+constexpr std::array kLogLevelStyleDefinitions{
+    LogLevelStyleDefinition{LogLevel_Error, "error", "Error", "#b22222", "#fff3a6"},
+    LogLevelStyleDefinition{LogLevel_Warn, "warning", "Warning", "#d97706", "#ffffff"},
+    LogLevelStyleDefinition{LogLevel_Notice, "notice", "Notice", "#1e3a5f", "#ffffff"},
+    LogLevelStyleDefinition{LogLevel_Info, "info", "Info", "#1e3a5f", "#ffffff"},
+    LogLevelStyleDefinition{LogLevel_Debug, "debug", "Debug", "#0f766e", "#ffffff"},
+    LogLevelStyleDefinition{LogLevel_Trace, "trace", "Trace", "#6b7280", "#ffffff"},
+};
+
+const LogLevelStyleDefinition& definitionForLevel(int level) {
+  const auto clamped = static_cast<LogLevel>(
+      std::clamp(level, static_cast<int>(LogLevel_Error), static_cast<int>(LogLevel_Trace)));
+  return kLogLevelStyleDefinitions.at(static_cast<size_t>(clamped));
+}
+
+QString colorKey(const char* level_key, const char* channel) {
+  return QStringLiteral("ui/log/colors/%1/%2")
+      .arg(QString::fromUtf8(level_key), QString::fromUtf8(channel));
+}
+
+}  // namespace
+
+UiSettings::UiSettings(QObject* parent)
+    : QObject(parent) {
+  QFontDatabase font_database;
+  log_font_families_ = font_database.families();
+  std::sort(log_font_families_.begin(), log_font_families_.end());
+  log_font_families_.removeDuplicates();
+
+  const QSettings settings;
+  const auto default_family = defaultLogFontFamily();
+  const auto stored_family = settings.value(QLatin1StringView{kLogFontFamilyKey}, default_family).toString().trimmed();
+  log_font_family_ = stored_family.isEmpty() ? default_family : stored_family;
+  log_base_font_pixel_size_ = clampBaseFontPixelSize(
+      settings.value(QLatin1StringView{kLogBaseFontPixelSizeKey}, kDefaultLogBaseFontPixelSize).toInt());
+  log_zoom_percent_ = clampZoomPercent(
+      settings.value(QLatin1StringView{kLogZoomPercentKey}, kDefaultLogZoomPercent).toInt());
+  follow_live_logs_by_default_ =
+      settings.value(QLatin1StringView{kFollowLiveLogsByDefaultKey}, true).toBool();
+
+  for (const auto& definition : kLogLevelStyleDefinitions) {
+    const auto level_index = static_cast<size_t>(definition.level);
+    log_level_foreground_colors_[level_index] = normalizedColor(
+        settings.value(colorKey(definition.key, "foreground"), QString::fromUtf8(definition.foreground)).toString(),
+        QString::fromUtf8(definition.foreground));
+    log_level_background_colors_[level_index] = normalizedColor(
+        settings.value(colorKey(definition.key, "background"), QString::fromUtf8(definition.background)).toString(),
+        QString::fromUtf8(definition.background));
+  }
+}
+
+UiSettings& UiSettings::instance() {
+  static UiSettings instance;
+  return instance;
+}
+
+QStringList UiSettings::logFontFamilies() const {
+  return log_font_families_;
+}
+
+QString UiSettings::logFontFamily() const noexcept {
+  return log_font_family_;
+}
+
+int UiSettings::logBaseFontPixelSize() const noexcept {
+  return log_base_font_pixel_size_;
+}
+
+int UiSettings::logZoomPercent() const noexcept {
+  return log_zoom_percent_;
+}
+
+int UiSettings::effectiveLogFontPixelSize() const noexcept {
+  return std::max(
+      1,
+      (log_base_font_pixel_size_ * log_zoom_percent_ + (kDefaultLogZoomPercent / 2)) / kDefaultLogZoomPercent);
+}
+
+bool UiSettings::followLiveLogsByDefault() const noexcept {
+  return follow_live_logs_by_default_;
+}
+
+QVariantList UiSettings::logLevelStyles() const {
+  QVariantList styles;
+  styles.reserve(static_cast<qsizetype>(kLogLevelStyleDefinitions.size()));
+  for (const auto& definition : kLogLevelStyleDefinitions) {
+    QVariantMap style;
+    style.insert(QStringLiteral("level"), static_cast<int>(definition.level));
+    style.insert(QStringLiteral("name"), tr(definition.name));
+    style.insert(QStringLiteral("foregroundColor"),
+                 log_level_foreground_colors_.at(static_cast<size_t>(definition.level)));
+    style.insert(QStringLiteral("backgroundColor"),
+                 log_level_background_colors_.at(static_cast<size_t>(definition.level)));
+    styles.push_back(style);
+  }
+  return styles;
+}
+
+int UiSettings::logLevelStylesRevision() const noexcept {
+  return log_level_styles_revision_;
+}
+
+int UiSettings::minLogBaseFontPixelSize() const noexcept {
+  return kMinLogBaseFontPixelSize;
+}
+
+int UiSettings::maxLogBaseFontPixelSize() const noexcept {
+  return kMaxLogBaseFontPixelSize;
+}
+
+int UiSettings::minLogZoomPercent() const noexcept {
+  return kMinLogZoomPercent;
+}
+
+int UiSettings::maxLogZoomPercent() const noexcept {
+  return kMaxLogZoomPercent;
+}
+
+void UiSettings::setLogFontFamily(const QString& family) {
+  const auto trimmed = family.trimmed();
+  const auto next_family = trimmed.isEmpty() ? defaultLogFontFamily() : trimmed;
+  if (log_font_family_ == next_family) {
+    return;
+  }
+
+  log_font_family_ = next_family;
+  saveValue(QLatin1StringView{kLogFontFamilyKey}, log_font_family_);
+  emit logFontFamilyChanged();
+}
+
+void UiSettings::setLogBaseFontPixelSize(int pixel_size) {
+  const int clamped = clampBaseFontPixelSize(pixel_size);
+  if (log_base_font_pixel_size_ == clamped) {
+    return;
+  }
+
+  log_base_font_pixel_size_ = clamped;
+  saveValue(QLatin1StringView{kLogBaseFontPixelSizeKey}, log_base_font_pixel_size_);
+  emit logBaseFontPixelSizeChanged();
+  emit effectiveLogFontPixelSizeChanged();
+}
+
+void UiSettings::setLogZoomPercent(int percent) {
+  const int clamped = clampZoomPercent(percent);
+  if (log_zoom_percent_ == clamped) {
+    return;
+  }
+
+  log_zoom_percent_ = clamped;
+  saveValue(QLatin1StringView{kLogZoomPercentKey}, log_zoom_percent_);
+  emit logZoomPercentChanged();
+  emit effectiveLogFontPixelSizeChanged();
+}
+
+void UiSettings::setFollowLiveLogsByDefault(bool enabled) {
+  if (follow_live_logs_by_default_ == enabled) {
+    return;
+  }
+
+  follow_live_logs_by_default_ = enabled;
+  saveValue(QLatin1StringView{kFollowLiveLogsByDefaultKey}, follow_live_logs_by_default_);
+  emit followLiveLogsByDefaultChanged();
+}
+
+QString UiSettings::logLevelForegroundColor(int level) const {
+  return colorForLevel(log_level_foreground_colors_, level);
+}
+
+QString UiSettings::logLevelBackgroundColor(int level) const {
+  return colorForLevel(log_level_background_colors_, level);
+}
+
+void UiSettings::setLogLevelForegroundColor(int level, const QString& color) {
+  setLogLevelColor(log_level_foreground_colors_, QStringLiteral("foreground"), level, color);
+}
+
+void UiSettings::setLogLevelBackgroundColor(int level, const QString& color) {
+  setLogLevelColor(log_level_background_colors_, QStringLiteral("background"), level, color);
+}
+
+void UiSettings::stepLogZoom(int steps) {
+  if (steps == 0) {
+    return;
+  }
+
+  setLogZoomPercent(log_zoom_percent_ + (steps * kLogZoomStepPercent));
+}
+
+void UiSettings::resetLogZoom() {
+  setLogZoomPercent(kDefaultLogZoomPercent);
+}
+
+void UiSettings::saveValue(const QString& key, const QVariant& value) const {
+  QSettings settings;
+  settings.setValue(key, value);
+  settings.sync();
+}
+
+QString UiSettings::defaultLogFontFamily() const {
+  return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
+}
+
+int UiSettings::clampBaseFontPixelSize(int pixel_size) const noexcept {
+  return std::clamp(pixel_size, kMinLogBaseFontPixelSize, kMaxLogBaseFontPixelSize);
+}
+
+int UiSettings::clampZoomPercent(int percent) const noexcept {
+  return std::clamp(percent, kMinLogZoomPercent, kMaxLogZoomPercent);
+}
+
+size_t UiSettings::colorIndexForLevel(int level) const noexcept {
+  return static_cast<size_t>(
+      std::clamp(level, static_cast<int>(LogLevel_Error), static_cast<int>(LogLevel_Trace)));
+}
+
+QString UiSettings::colorForLevel(const std::array<QString, number_of_log_levels>& colors, int level) const {
+  return colors.at(colorIndexForLevel(level));
+}
+
+QString UiSettings::normalizedColor(const QString& color, const QString& fallback) const {
+  const QColor parsed(color.trimmed());
+  if (parsed.isValid()) {
+    return parsed.name(QColor::HexRgb);
+  }
+
+  const QColor fallback_color(fallback);
+  return fallback_color.isValid() ? fallback_color.name(QColor::HexRgb) : QStringLiteral("#ffffff");
+}
+
+void UiSettings::setLogLevelColor(std::array<QString, number_of_log_levels>& colors, const QString& key_prefix,
+                                  int level, const QString& color) {
+  const auto& definition = definitionForLevel(level);
+  const auto color_index = colorIndexForLevel(level);
+  const bool foreground = key_prefix == QStringLiteral("foreground");
+  const auto fallback =
+      foreground ? QString::fromUtf8(definition.foreground) : QString::fromUtf8(definition.background);
+  const auto normalized = normalizedColor(color, fallback);
+  if (colors[color_index] == normalized) {
+    return;
+  }
+
+  colors[color_index] = normalized;
+  saveValue(colorKey(definition.key, foreground ? "foreground" : "background"), normalized);
+  ++log_level_styles_revision_;
+  emit logLevelStylesChanged();
+}
+
+}  // namespace lgx
