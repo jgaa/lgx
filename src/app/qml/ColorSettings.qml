@@ -58,6 +58,14 @@ ScrollView {
         return -1
     }
 
+    function colorChoiceValue(index, fallback) {
+        return index >= 0 && index < colorChoices.length ? colorChoices[index].value : fallback
+    }
+
+    function colorChoiceName(index, fallback) {
+        return index >= 0 && index < colorChoices.length ? colorChoices[index].name : fallback
+    }
+
     function commit() {
     }
 
@@ -148,18 +156,15 @@ ScrollView {
                             ComboBox {
                                 id: foregroundCombo
                                 readonly property string currentColorValue: parent.foregroundColorValue
-                                readonly property string selectedColorValue: currentIndex >= 0 ? root.colorChoices[currentIndex].value : currentColorValue
-                                readonly property string selectedColorName: currentIndex >= 0 ? root.colorChoices[currentIndex].name : currentColorValue
                                 Layout.fillWidth: true
                                 Layout.preferredWidth: 1
                                 Layout.alignment: Qt.AlignVCenter
                                 Layout.minimumWidth: 0
+                                leftPadding: 30
+                                currentIndex: root.colorChoiceIndex(currentColorValue)
                                 model: root.colorChoices
                                 textRole: "name"
-                                displayText: ""
 
-                                Component.onCompleted: currentIndex = root.colorChoiceIndex(currentColorValue)
-                                onCurrentColorValueChanged: currentIndex = root.colorChoiceIndex(currentColorValue)
                                 onActivated: function(index) {
                                     if (index >= 0) {
                                         UiSettings.setLogLevelForegroundColor(parent.levelValue, root.colorChoices[index].value)
@@ -197,16 +202,6 @@ ScrollView {
                                     }
                                 }
 
-                                contentItem: Text {
-                                    leftPadding: 30
-                                    rightPadding: foregroundCombo.indicator.width + foregroundCombo.spacing + 8
-                                    text: foregroundCombo.selectedColorName
-                                    font: foregroundCombo.font
-                                    color: foregroundCombo.palette.buttonText
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                }
-
                                 Rectangle {
                                     width: 16
                                     height: 16
@@ -214,7 +209,7 @@ ScrollView {
                                     anchors.left: parent.left
                                     anchors.leftMargin: 8
                                     anchors.verticalCenter: parent.verticalCenter
-                                    color: foregroundCombo.selectedColorValue
+                                    color: foregroundCombo.currentColorValue
                                     border.width: 1
                                     border.color: "#7f7f7f"
                                     z: 1
@@ -224,18 +219,15 @@ ScrollView {
                             ComboBox {
                                 id: backgroundCombo
                                 readonly property string currentColorValue: parent.backgroundColorValue
-                                readonly property string selectedColorValue: currentIndex >= 0 ? root.colorChoices[currentIndex].value : currentColorValue
-                                readonly property string selectedColorName: currentIndex >= 0 ? root.colorChoices[currentIndex].name : currentColorValue
                                 Layout.fillWidth: true
                                 Layout.preferredWidth: 1
                                 Layout.alignment: Qt.AlignVCenter
                                 Layout.minimumWidth: 0
+                                leftPadding: 30
+                                currentIndex: root.colorChoiceIndex(currentColorValue)
                                 model: root.colorChoices
                                 textRole: "name"
-                                displayText: ""
 
-                                Component.onCompleted: currentIndex = root.colorChoiceIndex(currentColorValue)
-                                onCurrentColorValueChanged: currentIndex = root.colorChoiceIndex(currentColorValue)
                                 onActivated: function(index) {
                                     if (index >= 0) {
                                         UiSettings.setLogLevelBackgroundColor(parent.levelValue, root.colorChoices[index].value)
@@ -273,16 +265,6 @@ ScrollView {
                                     }
                                 }
 
-                                contentItem: Text {
-                                    leftPadding: 30
-                                    rightPadding: backgroundCombo.indicator.width + backgroundCombo.spacing + 8
-                                    text: backgroundCombo.selectedColorName
-                                    font: backgroundCombo.font
-                                    color: backgroundCombo.palette.buttonText
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                }
-
                                 Rectangle {
                                     width: 16
                                     height: 16
@@ -290,7 +272,7 @@ ScrollView {
                                     anchors.left: parent.left
                                     anchors.leftMargin: 8
                                     anchors.verticalCenter: parent.verticalCenter
-                                    color: backgroundCombo.selectedColorValue
+                                    color: backgroundCombo.currentColorValue
                                     border.width: 1
                                     border.color: "#7f7f7f"
                                     z: 1

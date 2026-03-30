@@ -223,6 +223,16 @@ Item {
                     onToggled: root.toggleLevel(modelData.level, checked)
                 }
             }
+
+            Item {
+                Layout.fillHeight: true
+            }
+
+            Button {
+                Layout.alignment: Qt.AlignRight
+                text: qsTr("Close")
+                onClicked: levelsPopup.close()
+            }
         }
     }
 

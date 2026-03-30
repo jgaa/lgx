@@ -510,7 +510,7 @@ Item {
     }
 
     Shortcut {
-        sequence: StandardKey.Copy
+        sequences: [StandardKey.Copy]
         enabled: root.hasSelection
         onActivated: root.copySelectionToClipboard()
     }

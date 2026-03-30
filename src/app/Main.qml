@@ -678,7 +678,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: AppInfo.description
+                    text: AppInfo ? AppInfo.description : ""
                     font.pixelSize: 18
                 }
 
@@ -820,5 +820,17 @@ ApplicationWindow {
         sequence: "Ctrl+L"
         enabled: !!window.activeLogView && window.activeLineCount > 0
         onActivated: window.openGoToLineDialog()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+F"
+        enabled: !!window.activeWorkspace
+        onActivated: window.activeWorkspace.openNewFilterView(Qt.Vertical)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+F"
+        enabled: !!window.activeWorkspace
+        onActivated: window.activeWorkspace.openNewFilterView(Qt.Horizontal)
     }
 }

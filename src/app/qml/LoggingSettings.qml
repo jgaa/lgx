@@ -39,6 +39,7 @@ ScrollView {
     }
 
     GridLayout {
+        id: formLayout
         width: root.availableWidth
         columns: width >= 420 ? 2 : 1
         rowSpacing: 8
@@ -112,7 +113,7 @@ ScrollView {
         }
 
         Label {
-            Layout.columnSpan: columns
+            Layout.columnSpan: formLayout.columns
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             text: qsTr("Logging changes apply on the next application start.")

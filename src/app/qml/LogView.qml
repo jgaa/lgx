@@ -26,7 +26,8 @@ Item {
             return ""
         }
 
-        return sourceUrl.toString().startsWith("file://") ? sourceUrl.toLocalFile() : sourceUrl.toString()
+        const urlText = sourceUrl.toString()
+        return urlText.startsWith("file://") ? decodeURIComponent(urlText.slice(7)) : urlText
     }
     readonly property bool following: !!logModel && logModel.following
     property bool wrapLogLines: false

@@ -264,6 +264,11 @@ bool FilterModel::matchesSourceRow(int source_row) const {
     }
   }
 
+  const bool has_text_filter = !pattern_.isEmpty();
+  if (!any_level_enabled && !has_text_filter) {
+    return false;
+  }
+
   if (any_level_enabled) {
     const int level = source_model_->logLevelAt(source_row);
     if (level < 0 || level >= static_cast<int>(enabled_levels_.size())
@@ -272,7 +277,7 @@ bool FilterModel::matchesSourceRow(int source_row) const {
     }
   }
 
-  if (pattern_.isEmpty()) {
+  if (!has_text_filter) {
     return true;
   }
 
@@ -313,10 +318,50 @@ void FilterModel::markDirty() {
 void FilterModel::rebuildFilter() {
   QVector<int> next_rows;
   if (source_model_) {
-    next_rows.reserve(source_model_->rowCount());
-    for (int source_row = 0; source_row < source_model_->rowCount(); ++source_row) {
-      if (matchesSourceRow(source_row)) {
-        next_rows.push_back(source_row);
+    bool any_level_enabled = false;
+    QVector<int> enabled_levels;
+    enabled_levels.reserve(static_cast<qsizetype>(enabled_levels_.size()));
+    for (int level = 0; level < static_cast<int>(enabled_levels_.size()); ++level) {
+      if (enabled_levels_.at(static_cast<size_t>(level))) {
+        any_level_enabled = true;
+        enabled_levels.push_back(level);
+      }
+    }
+
+    const bool has_text_filter = !pattern_.isEmpty();
+    if (any_level_enabled && !has_text_filter) {
+      QVector<int> next_source_rows;
+      next_source_rows.reserve(enabled_levels.size());
+      for (int level : enabled_levels) {
+        next_source_rows.push_back(source_model_->nextLineOfLevel(-1, level));
+      }
+
+      while (true) {
+        int next_match = -1;
+        for (int candidate : next_source_rows) {
+          if (candidate >= 0 && (next_match < 0 || candidate < next_match)) {
+            next_match = candidate;
+          }
+        }
+
+        if (next_match < 0) {
+          break;
+        }
+
+        next_rows.push_back(next_match);
+        for (int index = 0; index < next_source_rows.size(); ++index) {
+          if (next_source_rows.at(index) == next_match) {
+            next_source_rows[index] =
+                source_model_->nextLineOfLevel(next_match, enabled_levels.at(index));
+          }
+        }
+      }
+    } else {
+      next_rows.reserve(source_model_->rowCount());
+      for (int source_row = 0; source_row < source_model_->rowCount(); ++source_row) {
+        if (matchesSourceRow(source_row)) {
+          next_rows.push_back(source_row);
+        }
       }
     }
   }
