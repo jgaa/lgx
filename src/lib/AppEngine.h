@@ -13,6 +13,7 @@
 
 namespace lgx {
 class FilterModel;
+class MarkedModel;
 }
 
 namespace lgx {
@@ -99,6 +100,7 @@ class AppEngine : public QObject {
    */
   Q_INVOKABLE QObject* createLogModel(const QUrl& url);
   Q_INVOKABLE QObject* createFilterModel(const QUrl& url);
+  Q_INVOKABLE QObject* createMarkedModel(const QUrl& url);
 
   /**
    * @brief Release one QML-side claim on a previously acquired model.
@@ -110,6 +112,7 @@ class AppEngine : public QObject {
    */
   Q_INVOKABLE void releaseLogModel(const QUrl& url);
   Q_INVOKABLE void releaseFilterModel(QObject* model);
+  Q_INVOKABLE void releaseMarkedModel(QObject* model);
 
   /**
    * @brief Resolve the currently registered model for a URL.

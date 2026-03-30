@@ -15,6 +15,7 @@
 #include "FilterModel.h"
 #include "FileSource.h"
 #include "LogScanner.h"
+#include "MarkedModel.h"
 #include "UiSettings.h"
 
 namespace lgx {
@@ -193,6 +194,17 @@ QObject* AppEngine::createFilterModel(const QUrl& url) {
   return model;
 }
 
+QObject* AppEngine::createMarkedModel(const QUrl& url) {
+  auto* source_model = qobject_cast<LogModel*>(createLogModel(url));
+  if (!source_model) {
+    return nullptr;
+  }
+
+  auto* model = new MarkedModel(source_model, this);
+  QQmlEngine::setObjectOwnership(model, QQmlEngine::CppOwnership);
+  return model;
+}
+
 void AppEngine::releaseLogModel(const QUrl& url) {
   const auto canonical = canonicalUrl(url);
   auto it = models_.find(canonical);
@@ -220,6 +232,17 @@ void AppEngine::releaseFilterModel(QObject* model) {
 
   const QUrl source_url = filter_model->sourceUrl();
   filter_model->deleteLater();
+  releaseLogModel(source_url);
+}
+
+void AppEngine::releaseMarkedModel(QObject* model) {
+  auto* marked_model = qobject_cast<MarkedModel*>(model);
+  if (!marked_model) {
+    return;
+  }
+
+  const QUrl source_url = marked_model->sourceUrl();
+  marked_model->deleteLater();
   releaseLogModel(source_url);
 }
 

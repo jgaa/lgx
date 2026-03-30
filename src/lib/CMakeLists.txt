@@ -7,6 +7,7 @@ add_library(lgx_lib
   FilterModel.cpp
   LogScanner.cpp
   LogModel.cpp
+  MarkedModel.cpp
   OpenLogsModel.cpp
   RecentLogsModel.cpp
   AppEngine.cpp
@@ -20,6 +21,7 @@ add_library(lgx_lib
   FilterModel.h
   LogScanner.h
   LogModel.h
+  MarkedModel.h
   OpenLogsModel.h
   RecentLogsModel.h
   LogSource.h

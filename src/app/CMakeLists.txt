@@ -12,6 +12,7 @@ qt_add_qml_module(lgx_app
     qml/FilterView.qml
     qml/LogLineList.qml
     qml/LogWorkspace.qml
+    qml/MarkedView.qml
     qml/components/LineMarkButton.qml
     qml/components/SymbolToolButton.qml
     qml/DialogHelper.js

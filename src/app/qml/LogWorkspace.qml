@@ -19,6 +19,19 @@ Item {
         }
     }
 
+    function firstLeafId(node) {
+        if (!node) {
+            return -1
+        }
+
+        if (node.kind === "leaf") {
+            return node.id
+        }
+
+        const firstId = firstLeafId(node.first)
+        return firstId >= 0 ? firstId : firstLeafId(node.second)
+    }
+
     function cloneNode(node) {
         if (!node) {
             return null
@@ -81,6 +94,40 @@ Item {
         }
     }
 
+    function closeLeaf(node, targetId) {
+        if (!node) {
+            return null
+        }
+
+        if (node.kind === "leaf") {
+            return node.id === targetId ? null : cloneNode(node)
+        }
+
+        const nextFirst = closeLeaf(node.first, targetId)
+        const nextSecond = closeLeaf(node.second, targetId)
+        if (!nextFirst && !nextSecond) {
+            return null
+        }
+        if (!nextFirst) {
+            return nextSecond
+        }
+        if (!nextSecond) {
+            return nextFirst
+        }
+
+        return {
+            kind: "split",
+            id: node.id,
+            orientation: node.orientation,
+            initialFirstRatio: node.initialFirstRatio,
+            initialSecondRatio: node.initialSecondRatio,
+            initialFirstSize: node.initialFirstSize,
+            initialSecondSize: node.initialSecondSize,
+            first: nextFirst,
+            second: nextSecond
+        }
+    }
+
     function resetLayout() {
         nextNodeId = 1
         primaryLogView = null
@@ -98,7 +145,7 @@ Item {
         activeNodeId = nodeId
     }
 
-    function openNewFilterView(orientation) {
+    function openNewView(viewType, orientation) {
         if (!layoutRoot) {
             resetLayout()
         }
@@ -107,7 +154,26 @@ Item {
         const targetExtent = activeView
             ? (orientation === Qt.Horizontal ? activeView.width : activeView.height)
             : 0
-        layoutRoot = splitLeaf(layoutRoot, targetNodeId, orientation, "filter", targetExtent)
+        layoutRoot = splitLeaf(layoutRoot, targetNodeId, orientation, viewType, targetExtent)
+    }
+
+    function openNewFilterView(orientation) {
+        openNewView("filter", orientation)
+    }
+
+    function openNewMarkedView(orientation) {
+        openNewView("marked", orientation)
+    }
+
+    function closePane(nodeId) {
+        if (!layoutRoot || nodeId < 0 || nodeId === layoutRoot.id) {
+            return
+        }
+
+        primaryLogView = null
+        activeView = null
+        layoutRoot = closeLeaf(layoutRoot, nodeId)
+        activeNodeId = firstLeafId(layoutRoot)
     }
 
     function revealSourceRowInPrimaryLog(sourceRow) {
@@ -263,7 +329,18 @@ Item {
 
                 Loader {
                     anchors.fill: parent
-                    sourceComponent: nodeRoot.nodeData && nodeRoot.nodeData.viewType === "filter" ? filterViewComponent : logViewComponent
+                    sourceComponent: {
+                        if (!nodeRoot.nodeData) {
+                            return logViewComponent
+                        }
+                        if (nodeRoot.nodeData.viewType === "filter") {
+                            return filterViewComponent
+                        }
+                        if (nodeRoot.nodeData.viewType === "marked") {
+                            return markedViewComponent
+                        }
+                        return logViewComponent
+                    }
                 }
             }
 
@@ -282,6 +359,16 @@ Item {
                 id: filterViewComponent
 
                 FilterView {
+                    sourceUrl: nodeRoot.workspace ? nodeRoot.workspace.sourceUrl : ""
+                    workspace: nodeRoot.workspace
+                    nodeId: nodeRoot.nodeData ? nodeRoot.nodeData.id : -1
+                }
+            }
+
+            Component {
+                id: markedViewComponent
+
+                MarkedView {
                     sourceUrl: nodeRoot.workspace ? nodeRoot.workspace.sourceUrl : ""
                     workspace: nodeRoot.workspace
                     nodeId: nodeRoot.nodeData ? nodeRoot.nodeData.id : -1

@@ -376,7 +376,7 @@ ApplicationWindow {
             title: qsTr("&Windows")
 
             Menu {
-                title: qsTr("New Filter View")
+                title: qsTr("Add Filter View")
                 enabled: !!window.activeWorkspace
 
                 MenuItem {
@@ -387,6 +387,21 @@ ApplicationWindow {
                 MenuItem {
                     text: qsTr("Vertical Split")
                     onTriggered: window.activeWorkspace.openNewFilterView(Qt.Horizontal)
+                }
+            }
+
+            Menu {
+                title: qsTr("Add Marked View")
+                enabled: !!window.activeWorkspace
+
+                MenuItem {
+                    text: qsTr("Horizontal Split")
+                    onTriggered: window.activeWorkspace.openNewMarkedView(Qt.Vertical)
+                }
+
+                MenuItem {
+                    text: qsTr("Vertical Split")
+                    onTriggered: window.activeWorkspace.openNewMarkedView(Qt.Horizontal)
                 }
             }
 
@@ -832,5 +847,17 @@ ApplicationWindow {
         sequence: "Ctrl+Shift+F"
         enabled: !!window.activeWorkspace
         onActivated: window.activeWorkspace.openNewFilterView(Qt.Horizontal)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+M"
+        enabled: !!window.activeWorkspace
+        onActivated: window.activeWorkspace.openNewMarkedView(Qt.Vertical)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+M"
+        enabled: !!window.activeWorkspace
+        onActivated: window.activeWorkspace.openNewMarkedView(Qt.Horizontal)
     }
 }

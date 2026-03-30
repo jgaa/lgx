@@ -262,20 +262,60 @@ Item {
     Menu {
         id: viewMenu
 
-        MenuItem {
-            text: qsTr("New Filter View Horizontal Split")
-            onTriggered: {
-                if (root.workspace) {
-                    root.workspace.openNewFilterView(Qt.Vertical)
+        Menu {
+            title: qsTr("Add Filter View")
+
+            MenuItem {
+                text: qsTr("Horizontal Split")
+                onTriggered: {
+                    if (root.workspace) {
+                        root.workspace.openNewFilterView(Qt.Vertical)
+                    }
+                }
+            }
+
+            MenuItem {
+                text: qsTr("Vertical Split")
+                onTriggered: {
+                    if (root.workspace) {
+                        root.workspace.openNewFilterView(Qt.Horizontal)
+                    }
                 }
             }
         }
 
-        MenuItem {
-            text: qsTr("New Filter View Vertical Split")
-            onTriggered: {
-                if (root.workspace) {
-                    root.workspace.openNewFilterView(Qt.Horizontal)
+        Menu {
+            title: qsTr("Add Marked View")
+
+            MenuItem {
+                text: qsTr("Horizontal Split")
+                onTriggered: {
+                    if (root.workspace) {
+                        root.workspace.openNewMarkedView(Qt.Vertical)
+                    }
+                }
+            }
+
+            MenuItem {
+                text: qsTr("Vertical Split")
+                onTriggered: {
+                    if (root.workspace) {
+                        root.workspace.openNewMarkedView(Qt.Horizontal)
+                    }
+                }
+            }
+        }
+
+        Menu {
+            title: qsTr("Close")
+
+            MenuItem {
+                text: qsTr("This Pane")
+                enabled: !!root.workspace && root.nodeId >= 0
+                onTriggered: {
+                    if (root.workspace) {
+                        root.workspace.closePane(root.nodeId)
+                    }
                 }
             }
         }
