@@ -14,6 +14,7 @@ constexpr auto kLogFontFamilyKey = "ui/log/fontFamily";
 constexpr auto kLogBaseFontPixelSizeKey = "ui/log/baseFontPixelSize";
 constexpr auto kLogZoomPercentKey = "ui/log/zoomPercent";
 constexpr auto kFollowLiveLogsByDefaultKey = "ui/log/followLiveLogsByDefault";
+constexpr auto kAdbExecutablePathKey = "ui/adb/executablePath";
 constexpr int kDefaultLogBaseFontPixelSize = 13;
 constexpr int kMinLogBaseFontPixelSize = 8;
 constexpr int kMaxLogBaseFontPixelSize = 36;
@@ -89,6 +90,8 @@ UiSettings::UiSettings(QObject* parent)
       settings.value(QLatin1StringView{kLogZoomPercentKey}, kDefaultLogZoomPercent).toInt());
   follow_live_logs_by_default_ =
       settings.value(QLatin1StringView{kFollowLiveLogsByDefaultKey}, true).toBool();
+  adb_executable_path_ =
+      settings.value(QLatin1StringView{kAdbExecutablePathKey}, QString{}).toString().trimmed();
 
   for (const auto& definition : kLogLevelStyleDefinitions) {
     const auto level_index = static_cast<size_t>(definition.level);
@@ -137,6 +140,10 @@ int UiSettings::effectiveLogFontPixelSize() const noexcept {
 
 bool UiSettings::followLiveLogsByDefault() const noexcept {
   return follow_live_logs_by_default_;
+}
+
+QString UiSettings::adbExecutablePath() const noexcept {
+  return adb_executable_path_;
 }
 
 QVariantList UiSettings::logLevelStyles() const {
@@ -223,6 +230,17 @@ void UiSettings::setFollowLiveLogsByDefault(bool enabled) {
   follow_live_logs_by_default_ = enabled;
   saveValue(QLatin1StringView{kFollowLiveLogsByDefaultKey}, follow_live_logs_by_default_);
   emit followLiveLogsByDefaultChanged();
+}
+
+void UiSettings::setAdbExecutablePath(const QString& path) {
+  const auto trimmed = path.trimmed();
+  if (adb_executable_path_ == trimmed) {
+    return;
+  }
+
+  adb_executable_path_ = trimmed;
+  saveValue(QLatin1StringView{kAdbExecutablePathKey}, adb_executable_path_);
+  emit adbExecutablePathChanged();
 }
 
 QString UiSettings::logLevelForegroundColor(int level) const {

@@ -4,11 +4,16 @@
 
 #include <QClipboard>
 #include <QDir>
+#include <QDirIterator>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QProcess>
+#include <QUuid>
 #include <QQmlEngine>
 #include <QSettings>
+#include <QStandardPaths>
+#include <QUrlQuery>
 
 #include <algorithm>
 
@@ -16,17 +21,164 @@
 #include "FileSource.h"
 #include "LogScanner.h"
 #include "MarkedModel.h"
+#include "StreamSource.h"
 #include "UiSettings.h"
+#include "logging.h"
 
 namespace lgx {
 namespace {
 
 constexpr int kRecentLogSourceLimit = 25;
+constexpr auto kRecentLogSourcesKey = "session/recentLogSources";
+constexpr auto kRecentPipeStreamsKey = "session/recentPipeStreams";
+
+QString adbProgramName() {
+#ifdef Q_OS_WIN
+  return QStringLiteral("adb.exe");
+#else
+  return QStringLiteral("adb");
+#endif
+}
+
+bool isExecutableFile(const QString& path) {
+  const QFileInfo info(path);
+  return info.exists() && info.isFile() && info.isExecutable();
+}
+
+QString adbVersionText(const QString& executable_path) {
+  if (!isExecutableFile(executable_path)) {
+    return {};
+  }
+
+  QProcess process;
+  process.setProgram(executable_path);
+  process.setArguments({QStringLiteral("version")});
+  process.start();
+  if (!process.waitForFinished(2000)) {
+    process.kill();
+    process.waitForFinished(200);
+    return {};
+  }
+
+  const auto output = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+  const auto first_line = output.section(QLatin1Char('\n'), 0, 0).trimmed();
+  return first_line;
+}
+
+QStringList candidateAdbRoots() {
+  QStringList roots;
+  const auto add_root = [&roots](const QString& value) {
+    const auto trimmed = value.trimmed();
+    if (!trimmed.isEmpty()) {
+      roots.push_back(QDir::cleanPath(trimmed));
+    }
+  };
+
+  add_root(qEnvironmentVariable("ANDROID_SDK_ROOT"));
+  add_root(qEnvironmentVariable("ANDROID_HOME"));
+
+  const auto home = QDir::homePath();
+  add_root(QDir(home).filePath(QStringLiteral("Android/Sdk")));
+  add_root(QDir(home).filePath(QStringLiteral("Android/sdk")));
+  add_root(QDir(home).filePath(QStringLiteral("Library/Android/sdk")));
+
+  roots.removeDuplicates();
+  return roots;
+}
+
+QString adbCandidateFromRoot(const QString& root_path) {
+  if (root_path.isEmpty()) {
+    return {};
+  }
+
+  if (isExecutableFile(root_path)) {
+    return QFileInfo(root_path).canonicalFilePath();
+  }
+
+  const QDir root_dir(root_path);
+  const auto direct = root_dir.filePath(adbProgramName());
+  if (isExecutableFile(direct)) {
+    return QFileInfo(direct).canonicalFilePath();
+  }
+
+  const auto platform_tools = root_dir.filePath(QStringLiteral("platform-tools/%1").arg(adbProgramName()));
+  if (isExecutableFile(platform_tools)) {
+    return QFileInfo(platform_tools).canonicalFilePath();
+  }
+
+  QDirIterator it(root_path,
+                  QStringList{adbProgramName()},
+                  QDir::Files | QDir::Executable,
+                  QDirIterator::Subdirectories);
+  while (it.hasNext()) {
+    const auto candidate = QFileInfo(it.next()).canonicalFilePath();
+    if (!candidate.isEmpty() && candidate.contains(QStringLiteral("/platform-tools/"))) {
+      return candidate;
+    }
+  }
+
+  return {};
+}
+
+QString adbDeviceLabel(const QString& model, const QString& device, const QString& serial) {
+  if (!model.trimmed().isEmpty()) {
+    return model.trimmed();
+  }
+  if (!device.trimmed().isEmpty()) {
+    return device.trimmed();
+  }
+  return serial.trimmed();
+}
+
+QString normalizedRecentPipeKey(const QUrl& url) {
+  const auto pipe_spec = StreamSource::parsePipeSpec(url);
+  if (!pipe_spec.has_value()) {
+    return {};
+  }
+
+  QUrl normalized;
+  normalized.setScheme(QStringLiteral("pipe"));
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("cmd"), pipe_spec->command);
+  query.addQueryItem(QStringLiteral("stdout"),
+                     pipe_spec->capture_stdout ? QStringLiteral("1") : QStringLiteral("0"));
+  query.addQueryItem(QStringLiteral("stderr"),
+                     pipe_spec->capture_stderr ? QStringLiteral("1") : QStringLiteral("0"));
+  normalized.setQuery(query);
+  return normalized.toString();
+}
+
+QString commandDisplayName(const QString& command) {
+  const auto trimmed = command.trimmed();
+  if (trimmed.isEmpty()) {
+    return QObject::tr("Pipe");
+  }
+
+  qsizetype split_at = trimmed.indexOf(QRegularExpression(QStringLiteral("\\s")));
+  if (split_at < 0) {
+    split_at = trimmed.size();
+  }
+
+  QString token = trimmed.left(split_at).trimmed();
+  if ((token.startsWith(QLatin1Char('"')) && token.endsWith(QLatin1Char('"')))
+      || (token.startsWith(QLatin1Char('\'')) && token.endsWith(QLatin1Char('\'')))) {
+    token = token.sliced(1, std::max<qsizetype>(0, token.size() - 2));
+  }
+
+  const QFileInfo info(token);
+  const auto file_name = info.fileName();
+  return file_name.isEmpty() ? token : file_name;
+}
 
 }  // namespace
 
 AppEngine::AppEngine(QObject* parent)
     : QObject(parent) {
+  docker_executable_ = QStandardPaths::findExecutable(QStringLiteral("docker"));
+  connect(&UiSettings::instance(), &UiSettings::adbExecutablePathChanged, this, [this]() {
+    emit adbExecutablePathChanged();
+    emit adbAvailabilityChanged();
+  });
   connect(&open_logs_, &QAbstractItemModel::rowsInserted, this, &AppEngine::openLogCountChanged);
   connect(&open_logs_, &QAbstractItemModel::rowsRemoved, this, &AppEngine::openLogCountChanged);
   connect(&open_logs_, &QAbstractItemModel::modelReset, this, &AppEngine::openLogCountChanged);
@@ -34,6 +186,7 @@ AppEngine::AppEngine(QObject* parent)
   connect(&open_logs_, &QAbstractItemModel::rowsRemoved, this, [this]() { updateCurrentLogModel(); });
   connect(&open_logs_, &QAbstractItemModel::modelReset, this, [this]() { updateCurrentLogModel(); });
   loadRecentLogSources();
+  loadRecentPipeStreams();
 }
 
 AppEngine& AppEngine::instance() {
@@ -57,6 +210,62 @@ int AppEngine::recentLogCount() const noexcept {
   return recent_logs_.rowCount();
 }
 
+QAbstractItemModel* AppEngine::recentPipeStreams() noexcept {
+  return &recent_pipe_streams_;
+}
+
+int AppEngine::recentPipeStreamCount() const noexcept {
+  return recent_pipe_streams_.rowCount();
+}
+
+bool AppEngine::dockerAvailable() const noexcept {
+  return !docker_executable_.isEmpty();
+}
+
+QString AppEngine::adbExecutablePath() const noexcept {
+  return UiSettings::instance().adbExecutablePath();
+}
+
+bool AppEngine::adbAvailable() const noexcept {
+  return isExecutableFile(adbExecutablePath());
+}
+
+QAbstractItemModel* AppEngine::adbCandidates() noexcept {
+  return &adb_candidates_;
+}
+
+int AppEngine::adbCandidateCount() const noexcept {
+  return adb_candidates_.rowCount();
+}
+
+QString AppEngine::adbScanError() const noexcept {
+  return adb_scan_error_;
+}
+
+QAbstractItemModel* AppEngine::adbDevices() noexcept {
+  return &adb_devices_;
+}
+
+int AppEngine::adbDeviceCount() const noexcept {
+  return adb_devices_.rowCount();
+}
+
+QString AppEngine::adbDeviceQueryError() const noexcept {
+  return adb_device_query_error_;
+}
+
+QAbstractItemModel* AppEngine::dockerContainers() noexcept {
+  return &docker_containers_;
+}
+
+int AppEngine::dockerContainerCount() const noexcept {
+  return docker_containers_.rowCount();
+}
+
+QString AppEngine::dockerContainerQueryError() const noexcept {
+  return docker_container_query_error_;
+}
+
 QStringList AppEngine::logScanners() const {
   return availableLogScannerNames();
 }
@@ -71,6 +280,14 @@ QUrl AppEngine::currentOpenLogSourceUrl() const {
 
 QObject* AppEngine::currentLogModel() const noexcept {
   return current_log_model_;
+}
+
+void AppEngine::setAdbExecutablePath(const QString& path) {
+  const auto previous_available = adbAvailable();
+  UiSettings::instance().setAdbExecutablePath(path);
+  if (previous_available != adbAvailable()) {
+    emit adbAvailabilityChanged();
+  }
 }
 
 void AppEngine::setCurrentOpenLogIndex(int index) {
@@ -90,17 +307,273 @@ int AppEngine::openLogSource(const QUrl& url) {
   return openLogSourceInternal(url, true);
 }
 
-int AppEngine::openLogSourceInternal(const QUrl& url, bool add_to_recent) {
-  const auto canonical = canonicalUrl(url);
-  if (!canonical.isValid() || canonical.isEmpty()) {
+int AppEngine::openPipeStream(const QString& command, bool include_stdout, bool include_stderr,
+                              bool remember_in_recents) {
+  if (command.trimmed().isEmpty() || (!include_stdout && !include_stderr)) {
     return -1;
   }
 
-  if (add_to_recent) {
+  const auto url = StreamSource::makePipeUrl(command, include_stdout, include_stderr);
+  if (remember_in_recents) {
+    addRecentPipeStream(url);
+  } else {
+    removeRecentPipeStream(url);
+  }
+  return openLogSourceInternal(url, false);
+}
+
+int AppEngine::openDockerContainerStream(const QString& container_id,
+                                         const QString& container_name) {
+  if (!dockerAvailable() || container_id.trimmed().isEmpty()) {
+    return -1;
+  }
+
+  return openLogSourceInternal(
+      StreamSource::makeDockerUrl(container_id.trimmed(), container_name.trimmed()), false);
+}
+
+int AppEngine::openAdbLogcatStream(const QString& serial, const QString& name) {
+  LOG_INFO << "Request to open ADB logcat stream for serial='"
+           << serial.trimmed().toStdString()
+           << "' name='" << name.trimmed().toStdString() << "'";
+  if (!adbAvailable() || serial.trimmed().isEmpty()) {
+    LOG_WARN << "Rejecting ADB logcat open request. adbAvailable="
+             << (adbAvailable() ? "true" : "false")
+             << " serialEmpty=" << (serial.trimmed().isEmpty() ? "true" : "false");
+    return -1;
+  }
+
+  const auto url = StreamSource::makeAdbLogcatUrl(serial.trimmed(), name.trimmed());
+  LOG_INFO << "Created ADB logcat URL: " << url.toString().toStdString();
+  const auto index = openLogSourceInternal(url, false);
+  LOG_INFO << "ADB logcat open result index=" << index;
+  return index;
+}
+
+int AppEngine::scanAdbExecutables() {
+  std::vector<QStringList> entries;
+  QSet<QString> seen_paths;
+
+  const auto add_candidate = [&entries, &seen_paths](const QString& path, const QString& source) {
+    const auto canonical = QFileInfo(path).canonicalFilePath();
+    if (canonical.isEmpty() || seen_paths.contains(canonical)) {
+      return;
+    }
+
+    seen_paths.insert(canonical);
+    entries.push_back(QStringList{
+        canonical,
+        adbVersionText(canonical),
+        source,
+    });
+  };
+
+  const auto from_path = QStandardPaths::findExecutable(adbProgramName());
+  if (!from_path.isEmpty()) {
+    add_candidate(from_path, tr("PATH"));
+  }
+
+  for (const auto& root : candidateAdbRoots()) {
+    const auto candidate = adbCandidateFromRoot(root);
+    if (!candidate.isEmpty()) {
+      add_candidate(candidate, root);
+    }
+  }
+
+  std::sort(entries.begin(), entries.end(), [](const QStringList& lhs, const QStringList& rhs) {
+    return lhs.value(0) < rhs.value(0);
+  });
+
+  adb_candidates_.setEntries(entries);
+  emit adbCandidatesChanged();
+
+  const QString next_error = entries.empty() ? tr("No adb executable found.") : QString{};
+  if (adb_scan_error_ != next_error) {
+    adb_scan_error_ = next_error;
+    emit adbScanErrorChanged();
+  }
+
+  if (entries.size() == 1) {
+    setAdbExecutablePath(entries.front().value(0));
+  }
+
+  return static_cast<int>(entries.size());
+}
+
+bool AppEngine::refreshAdbDevices() {
+  if (!adbAvailable()) {
+    adb_devices_.setEntries({});
+    const auto next_error = tr("ADB executable path is not configured.");
+    if (adb_device_query_error_ != next_error) {
+      adb_device_query_error_ = next_error;
+      emit adbDeviceQueryErrorChanged();
+    }
+    emit adbDevicesChanged();
+    return false;
+  }
+
+  QProcess process;
+  process.setProgram(adbExecutablePath());
+  process.setArguments({QStringLiteral("devices"), QStringLiteral("-l")});
+  process.start();
+  if (!process.waitForFinished(5000)) {
+    process.kill();
+    process.waitForFinished(500);
+    adb_devices_.setEntries({});
+    const auto next_error = tr("Timed out while querying ADB devices.");
+    if (adb_device_query_error_ != next_error) {
+      adb_device_query_error_ = next_error;
+      emit adbDeviceQueryErrorChanged();
+    }
+    emit adbDevicesChanged();
+    return false;
+  }
+
+  const auto stderr_text = QString::fromUtf8(process.readAllStandardError()).trimmed();
+  if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+    adb_devices_.setEntries({});
+    const auto next_error = !stderr_text.isEmpty() ? stderr_text : tr("Failed to query ADB devices.");
+    if (adb_device_query_error_ != next_error) {
+      adb_device_query_error_ = next_error;
+      emit adbDeviceQueryErrorChanged();
+    }
+    emit adbDevicesChanged();
+    return false;
+  }
+
+  std::vector<QStringList> entries;
+  const auto lines = QString::fromUtf8(process.readAllStandardOutput())
+                         .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+  for (const auto& raw_line : lines) {
+    const auto line = raw_line.trimmed();
+    if (line.isEmpty() || line.startsWith(QStringLiteral("List of devices attached"))) {
+      continue;
+    }
+
+    const auto tokens = line.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    if (tokens.size() < 2) {
+      continue;
+    }
+
+    QString model;
+    QString device;
+    QString product;
+    QString transport_id;
+    for (qsizetype i = 2; i < tokens.size(); ++i) {
+      const auto& token = tokens.at(i);
+      if (token.startsWith(QStringLiteral("model:"))) {
+        model = token.sliced(6);
+      } else if (token.startsWith(QStringLiteral("device:"))) {
+        device = token.sliced(7);
+      } else if (token.startsWith(QStringLiteral("product:"))) {
+        product = token.sliced(8);
+      } else if (token.startsWith(QStringLiteral("transport_id:"))) {
+        transport_id = token.sliced(13);
+      }
+    }
+
+    entries.push_back(QStringList{
+        tokens.at(0),
+        tokens.at(1),
+        model,
+        device,
+        product,
+        transport_id,
+    });
+  }
+
+  adb_devices_.setEntries(std::move(entries));
+  LOG_INFO << "ADB device query returned " << adb_devices_.rowCount() << " device(s)";
+  if (!adb_device_query_error_.isEmpty()) {
+    adb_device_query_error_.clear();
+    emit adbDeviceQueryErrorChanged();
+  }
+  emit adbDevicesChanged();
+  return true;
+}
+
+bool AppEngine::refreshDockerContainers() {
+  if (!dockerAvailable()) {
+    docker_containers_.setEntries({});
+    const QString next_error = tr("Docker is not installed.");
+    if (docker_container_query_error_ != next_error) {
+      docker_container_query_error_ = next_error;
+      emit dockerContainerQueryErrorChanged();
+    }
+    emit dockerContainersChanged();
+    return false;
+  }
+
+  QProcess process;
+  process.setProgram(docker_executable_);
+  process.setArguments({QStringLiteral("ps"),
+                        QStringLiteral("--format"),
+                        QStringLiteral("{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}")});
+  process.start();
+  if (!process.waitForFinished(5000)) {
+    process.kill();
+    process.waitForFinished(500);
+    docker_containers_.setEntries({});
+    const QString next_error = tr("Timed out while querying Docker containers.");
+    if (docker_container_query_error_ != next_error) {
+      docker_container_query_error_ = next_error;
+      emit dockerContainerQueryErrorChanged();
+    }
+    emit dockerContainersChanged();
+    return false;
+  }
+
+  const QString stderr_text = QString::fromUtf8(process.readAllStandardError()).trimmed();
+  if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+    docker_containers_.setEntries({});
+    const QString next_error = !stderr_text.isEmpty()
+        ? stderr_text
+        : tr("Failed to query Docker containers.");
+    if (docker_container_query_error_ != next_error) {
+      docker_container_query_error_ = next_error;
+      emit dockerContainerQueryErrorChanged();
+    }
+    emit dockerContainersChanged();
+    return false;
+  }
+
+  std::vector<QStringList> entries;
+  const auto lines = QString::fromUtf8(process.readAllStandardOutput())
+                         .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+  entries.reserve(lines.size());
+  for (const auto& line : lines) {
+    const auto fields = line.split(QLatin1Char('\t'));
+    if (!fields.isEmpty() && !fields.first().trimmed().isEmpty()) {
+      entries.push_back(fields);
+    }
+  }
+
+  docker_containers_.setEntries(std::move(entries));
+  if (!docker_container_query_error_.isEmpty()) {
+    docker_container_query_error_.clear();
+    emit dockerContainerQueryErrorChanged();
+  }
+  emit dockerContainersChanged();
+  return true;
+}
+
+int AppEngine::openLogSourceInternal(const QUrl& url, bool add_to_recent) {
+  const auto canonical = canonicalUrl(url);
+  LOG_INFO << "Open log source request url='" << url.toString().toStdString()
+           << "' canonical='" << canonical.toString().toStdString()
+           << "' addToRecent=" << (add_to_recent ? "true" : "false");
+  if (!canonical.isValid() || canonical.isEmpty()) {
+    LOG_WARN << "Rejecting log source open request because canonical URL is invalid or empty";
+    return -1;
+  }
+
+  if (add_to_recent && canonical.isLocalFile()) {
     addRecentLogSource(canonical);
   }
 
-  return open_logs_.addOpenLog(canonical, titleForUrl(canonical));
+  const auto index = open_logs_.addOpenLog(canonical, titleForUrl(canonical));
+  LOG_INFO << "Open log source resolved to tab index=" << index;
+  return index;
 }
 
 int AppEngine::openLogFile(const QUrl& initial_url) {
@@ -130,6 +603,20 @@ int AppEngine::openRecentLogSourceAt(int index) {
   return openLogSource(recent_logs_.sourceUrlAt(index));
 }
 
+int AppEngine::openRecentPipeStreamAt(int index) {
+  const auto recent_url = recent_pipe_streams_.sourceUrlAt(index);
+  const auto pipe_spec = StreamSource::parsePipeSpec(recent_url);
+  if (!pipe_spec.has_value()) {
+    return -1;
+  }
+
+  return openPipeStream(
+      pipe_spec->command,
+      pipe_spec->capture_stdout,
+      pipe_spec->capture_stderr,
+      true);
+}
+
 bool AppEngine::closeOpenLogAt(int index) {
   const auto source_url = open_logs_.sourceUrlAt(index);
   if (!open_logs_.removeOpenLogAt(index)) {
@@ -154,15 +641,22 @@ void AppEngine::copyTextToClipboard(const QString& text) const {
   }
 }
 
+void AppEngine::logUiTrace(const QString& message) const {
+  LOG_INFO << "UI: " << message.toStdString();
+}
+
 QObject* AppEngine::createLogModel(const QUrl& url) {
   const auto canonical = canonicalUrl(url);
+  LOG_INFO << "Create log model request for '" << canonical.toString().toStdString() << "'";
   if (!canonical.isValid() || canonical.isEmpty()) {
+    LOG_WARN << "Rejecting log model creation because URL is invalid or empty";
     return nullptr;
   }
 
   auto it = models_.find(canonical);
   if (it != models_.end() && it->model) {
     ++it->retain_count;
+    LOG_INFO << "Reusing existing log model. retainCount=" << it->retain_count;
     return it->model;
   }
 
@@ -175,11 +669,21 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
     model->setSource(std::move(source));
     model->setFollowing(UiSettings::instance().followLiveLogsByDefault());
     model->loadFromSource();
+  } else if (StreamSource::isSupportedUrl(canonical)) {
+    LOG_INFO << "Creating stream-backed log model for '" << canonical.toString().toStdString() << "'";
+    auto source = std::make_unique<StreamSource>();
+    source->open(canonical.toString().toStdString());
+    model->setSource(std::move(source));
+    model->setFollowing(UiSettings::instance().followLiveLogsByDefault());
+    model->loadFromSource();
   } else {
+    LOG_WARN << "Marking model as failed because source scheme is unsupported: "
+             << canonical.scheme().toStdString();
     model->markFailed();
   }
 
   models_.insert(canonical, ModelEntry{.model = model, .retain_count = 1});
+  LOG_INFO << "Created new log model for '" << canonical.toString().toStdString() << "'";
   return model;
 }
 
@@ -300,7 +804,7 @@ void AppEngine::saveSessionState() const {
   open_log_sources.reserve(open_logs_.rowCount());
   for (int index = 0; index < open_logs_.rowCount(); ++index) {
     const auto url = open_logs_.sourceUrlAt(index);
-    if (url.isValid() && !url.isEmpty()) {
+    if (url.isValid() && !url.isEmpty() && url.isLocalFile()) {
       open_log_sources.push_back(url.toString());
     }
   }
@@ -322,6 +826,20 @@ void AppEngine::restoreSavedSession() {
 }
 
 QString AppEngine::titleForUrl(const QUrl& url) {
+  if (const auto pipe_spec = StreamSource::parsePipeSpec(url); pipe_spec.has_value()) {
+    return QObject::tr("Pipe: %1").arg(commandDisplayName(pipe_spec->command));
+  }
+  if (const auto docker_spec = StreamSource::parseDockerSpec(url); docker_spec.has_value()) {
+    const auto label = docker_spec->container_name.isEmpty()
+        ? docker_spec->container_id
+        : docker_spec->container_name;
+    return QObject::tr("Docker: %1").arg(label);
+  }
+  if (const auto adb_spec = StreamSource::parseAdbLogcatSpec(url); adb_spec.has_value()) {
+    const auto label = adb_spec->name.isEmpty() ? adb_spec->serial : adb_spec->name;
+    return QObject::tr("Logcat: %1").arg(label);
+  }
+
   if (url.isLocalFile()) {
     const QFileInfo file_info(url.toLocalFile());
     if (!file_info.fileName().isEmpty()) {
@@ -337,6 +855,31 @@ QString AppEngine::titleForUrl(const QUrl& url) {
 }
 
 QString AppEngine::displaySourceForUrl(const QUrl& url) {
+  if (const auto pipe_spec = StreamSource::parsePipeSpec(url); pipe_spec.has_value()) {
+    QStringList channels;
+    if (pipe_spec->capture_stdout) {
+      channels.push_back(QObject::tr("stdout"));
+    }
+    if (pipe_spec->capture_stderr) {
+      channels.push_back(QObject::tr("stderr"));
+    }
+
+    return QObject::tr("Pipe [%1]: %2")
+        .arg(channels.join(QStringLiteral("+")))
+        .arg(pipe_spec->command);
+  }
+  if (const auto docker_spec = StreamSource::parseDockerSpec(url); docker_spec.has_value()) {
+    const auto label = docker_spec->container_name.isEmpty()
+        ? docker_spec->container_id
+        : docker_spec->container_name;
+    return QObject::tr("Docker container %1 (%2)")
+        .arg(label, docker_spec->container_id);
+  }
+  if (const auto adb_spec = StreamSource::parseAdbLogcatSpec(url); adb_spec.has_value()) {
+    const auto label = adb_spec->name.isEmpty() ? adb_spec->serial : adb_spec->name;
+    return QObject::tr("ADB logcat %1 (%2)").arg(label, adb_spec->serial);
+  }
+
   if (url.isLocalFile()) {
     return QDir::toNativeSeparators(url.toLocalFile());
   }
@@ -354,7 +897,7 @@ void AppEngine::addRecentLogSource(const QUrl& url) {
     return;
   }
 
-  QStringList values = QSettings{}.value("session/recentLogSources").toStringList();
+  QStringList values = QSettings{}.value(kRecentLogSourcesKey).toStringList();
   const auto encoded = canonical.toString();
   values.removeAll(encoded);
   values.prepend(encoded);
@@ -363,13 +906,13 @@ void AppEngine::addRecentLogSource(const QUrl& url) {
   }
 
   QSettings settings;
-  settings.setValue("session/recentLogSources", values);
+  settings.setValue(kRecentLogSourcesKey, values);
   settings.sync();
   loadRecentLogSources();
 }
 
 void AppEngine::loadRecentLogSources() {
-  const auto values = QSettings{}.value("session/recentLogSources").toStringList();
+  const auto values = QSettings{}.value(kRecentLogSourcesKey).toStringList();
   std::vector<QPair<QUrl, QString>> entries;
   entries.reserve(std::min<size_t>(static_cast<size_t>(values.size()), static_cast<size_t>(kRecentLogSourceLimit)));
   for (const auto& value : values) {
@@ -386,6 +929,83 @@ void AppEngine::loadRecentLogSources() {
 
   recent_logs_.setEntries(std::move(entries));
   emit recentLogsChanged();
+}
+
+void AppEngine::addRecentPipeStream(const QUrl& url) {
+  const auto canonical = canonicalUrl(url);
+  const auto pipe_spec = StreamSource::parsePipeSpec(canonical);
+  if (!pipe_spec.has_value()) {
+    return;
+  }
+
+  const auto normalized_key = normalizedRecentPipeKey(canonical);
+  if (normalized_key.isEmpty()) {
+    return;
+  }
+
+  QStringList values = QSettings{}.value(kRecentPipeStreamsKey).toStringList();
+  const auto encoded = canonical.toString();
+  values.erase(std::remove_if(values.begin(), values.end(),
+                              [&normalized_key](const QString& value) {
+                                return normalizedRecentPipeKey(QUrl(value)) == normalized_key;
+                              }),
+               values.end());
+  values.prepend(encoded);
+  while (values.size() > kRecentLogSourceLimit) {
+    values.removeLast();
+  }
+
+  QSettings settings;
+  settings.setValue(kRecentPipeStreamsKey, values);
+  settings.sync();
+  loadRecentPipeStreams();
+}
+
+void AppEngine::removeRecentPipeStream(const QUrl& url) {
+  const auto canonical = canonicalUrl(url);
+  const auto normalized_key = normalizedRecentPipeKey(canonical);
+  if (normalized_key.isEmpty()) {
+    return;
+  }
+
+  QStringList values = QSettings{}.value(kRecentPipeStreamsKey).toStringList();
+  values.erase(std::remove_if(values.begin(), values.end(),
+                              [&normalized_key](const QString& value) {
+                                return normalizedRecentPipeKey(QUrl(value)) == normalized_key;
+                              }),
+               values.end());
+
+  QSettings settings;
+  settings.setValue(kRecentPipeStreamsKey, values);
+  settings.sync();
+  loadRecentPipeStreams();
+}
+
+void AppEngine::loadRecentPipeStreams() {
+  const auto values = QSettings{}.value(kRecentPipeStreamsKey).toStringList();
+  std::vector<QPair<QUrl, QString>> entries;
+  entries.reserve(std::min<size_t>(static_cast<size_t>(values.size()), static_cast<size_t>(kRecentLogSourceLimit)));
+  QSet<QString> seen_keys;
+  for (const auto& value : values) {
+    const auto url = canonicalUrl(QUrl(value));
+    const auto pipe_spec = StreamSource::parsePipeSpec(url);
+    if (!pipe_spec.has_value()) {
+      continue;
+    }
+
+    const auto normalized_key = normalizedRecentPipeKey(url);
+    if (normalized_key.isEmpty() || seen_keys.contains(normalized_key)) {
+      continue;
+    }
+    seen_keys.insert(normalized_key);
+    entries.push_back(qMakePair(url, displaySourceForUrl(url)));
+    if (static_cast<int>(entries.size()) == kRecentLogSourceLimit) {
+      break;
+    }
+  }
+
+  recent_pipe_streams_.setEntries(std::move(entries));
+  emit recentPipeStreamsChanged();
 }
 
 }  // namespace lgx

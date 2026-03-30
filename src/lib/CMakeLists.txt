@@ -1,29 +1,37 @@
 add_library(lgx_lib
+  AdbCandidatesModel.cpp
+  AdbDevicesModel.cpp
   logging.cpp
   util.cpp
   PageCache.cpp
   FileMonitor.cpp
   FileSource.cpp
+  DockerContainersModel.cpp
   FilterModel.cpp
   LogScanner.cpp
   LogModel.cpp
   MarkedModel.cpp
   OpenLogsModel.cpp
   RecentLogsModel.cpp
+  StreamSource.cpp
   AppEngine.cpp
   UiSettings.cpp
+  AdbCandidatesModel.h
+  AdbDevicesModel.h
   util.h
   logging.h
   LogTypes.h
   PageCache.h
   FileMonitor.h
   FileSource.h
+  DockerContainersModel.h
   FilterModel.h
   LogScanner.h
   LogModel.h
   MarkedModel.h
   OpenLogsModel.h
   RecentLogsModel.h
+  StreamSource.h
   LogSource.h
   LogSource.cpp
   AppEngine.h

@@ -10,6 +10,9 @@
 #include "LogModel.h"
 #include "OpenLogsModel.h"
 #include "RecentLogsModel.h"
+#include "AdbCandidatesModel.h"
+#include "AdbDevicesModel.h"
+#include "DockerContainersModel.h"
 
 namespace lgx {
 class FilterModel;
@@ -32,6 +35,20 @@ class AppEngine : public QObject {
   Q_PROPERTY(int openLogCount READ openLogCount NOTIFY openLogCountChanged)
   Q_PROPERTY(QAbstractItemModel* recentLogs READ recentLogs CONSTANT)
   Q_PROPERTY(int recentLogCount READ recentLogCount NOTIFY recentLogsChanged)
+  Q_PROPERTY(QAbstractItemModel* recentPipeStreams READ recentPipeStreams CONSTANT)
+  Q_PROPERTY(int recentPipeStreamCount READ recentPipeStreamCount NOTIFY recentPipeStreamsChanged)
+  Q_PROPERTY(bool dockerAvailable READ dockerAvailable CONSTANT)
+  Q_PROPERTY(QString adbExecutablePath READ adbExecutablePath WRITE setAdbExecutablePath NOTIFY adbExecutablePathChanged)
+  Q_PROPERTY(bool adbAvailable READ adbAvailable NOTIFY adbAvailabilityChanged)
+  Q_PROPERTY(QAbstractItemModel* adbCandidates READ adbCandidates CONSTANT)
+  Q_PROPERTY(int adbCandidateCount READ adbCandidateCount NOTIFY adbCandidatesChanged)
+  Q_PROPERTY(QString adbScanError READ adbScanError NOTIFY adbScanErrorChanged)
+  Q_PROPERTY(QAbstractItemModel* adbDevices READ adbDevices CONSTANT)
+  Q_PROPERTY(int adbDeviceCount READ adbDeviceCount NOTIFY adbDevicesChanged)
+  Q_PROPERTY(QString adbDeviceQueryError READ adbDeviceQueryError NOTIFY adbDeviceQueryErrorChanged)
+  Q_PROPERTY(QAbstractItemModel* dockerContainers READ dockerContainers CONSTANT)
+  Q_PROPERTY(int dockerContainerCount READ dockerContainerCount NOTIFY dockerContainersChanged)
+  Q_PROPERTY(QString dockerContainerQueryError READ dockerContainerQueryError NOTIFY dockerContainerQueryErrorChanged)
   Q_PROPERTY(QStringList logScanners READ logScanners CONSTANT)
   Q_PROPERTY(int currentOpenLogIndex READ currentOpenLogIndex WRITE setCurrentOpenLogIndex NOTIFY currentOpenLogIndexChanged)
   Q_PROPERTY(QUrl currentOpenLogSourceUrl READ currentOpenLogSourceUrl NOTIFY currentOpenLogSourceUrlChanged)
@@ -51,11 +68,26 @@ class AppEngine : public QObject {
   [[nodiscard]] int openLogCount() const noexcept;
   [[nodiscard]] QAbstractItemModel* recentLogs() noexcept;
   [[nodiscard]] int recentLogCount() const noexcept;
+  [[nodiscard]] QAbstractItemModel* recentPipeStreams() noexcept;
+  [[nodiscard]] int recentPipeStreamCount() const noexcept;
+  [[nodiscard]] bool dockerAvailable() const noexcept;
+  [[nodiscard]] QString adbExecutablePath() const noexcept;
+  [[nodiscard]] bool adbAvailable() const noexcept;
+  [[nodiscard]] QAbstractItemModel* adbCandidates() noexcept;
+  [[nodiscard]] int adbCandidateCount() const noexcept;
+  [[nodiscard]] QString adbScanError() const noexcept;
+  [[nodiscard]] QAbstractItemModel* adbDevices() noexcept;
+  [[nodiscard]] int adbDeviceCount() const noexcept;
+  [[nodiscard]] QString adbDeviceQueryError() const noexcept;
+  [[nodiscard]] QAbstractItemModel* dockerContainers() noexcept;
+  [[nodiscard]] int dockerContainerCount() const noexcept;
+  [[nodiscard]] QString dockerContainerQueryError() const noexcept;
   [[nodiscard]] QStringList logScanners() const;
   [[nodiscard]] int currentOpenLogIndex() const noexcept;
   [[nodiscard]] QUrl currentOpenLogSourceUrl() const;
   [[nodiscard]] QObject* currentLogModel() const noexcept;
   Q_INVOKABLE void setCurrentOpenLogIndex(int index);
+  Q_INVOKABLE void setAdbExecutablePath(const QString& path);
 
   /**
    * @brief Open one log source in the UI tab model.
@@ -67,6 +99,14 @@ class AppEngine : public QObject {
    * @return Open tab index, or -1 for an invalid URL.
    */
   Q_INVOKABLE int openLogSource(const QUrl& url);
+  Q_INVOKABLE int openPipeStream(const QString& command, bool include_stdout, bool include_stderr,
+                                 bool remember_in_recents = true);
+  Q_INVOKABLE int openDockerContainerStream(const QString& container_id,
+                                            const QString& container_name = {});
+  Q_INVOKABLE int openAdbLogcatStream(const QString& serial, const QString& name = {});
+  Q_INVOKABLE int scanAdbExecutables();
+  Q_INVOKABLE bool refreshAdbDevices();
+  Q_INVOKABLE bool refreshDockerContainers();
 
   /**
    * @brief Prompt the user to choose a local file and open it as a log source.
@@ -77,6 +117,7 @@ class AppEngine : public QObject {
    */
   Q_INVOKABLE int openLogFile(const QUrl& initial_url = {});
   Q_INVOKABLE int openRecentLogSourceAt(int index);
+  Q_INVOKABLE int openRecentPipeStreamAt(int index);
   Q_INVOKABLE bool closeOpenLogAt(int index);
 
   /**
@@ -88,6 +129,7 @@ class AppEngine : public QObject {
   Q_INVOKABLE QUrl openLogSourceUrlAt(int index) const;
   Q_INVOKABLE QString displaySourceTextForUrl(const QUrl& url) const;
   Q_INVOKABLE void copyTextToClipboard(const QString& text) const;
+  Q_INVOKABLE void logUiTrace(const QString& message) const;
 
   /**
    * @brief Create or reuse a model for one log source URL.
@@ -135,6 +177,15 @@ class AppEngine : public QObject {
  signals:
   void openLogCountChanged();
   void recentLogsChanged();
+  void recentPipeStreamsChanged();
+  void adbExecutablePathChanged();
+  void adbAvailabilityChanged();
+  void adbCandidatesChanged();
+  void adbScanErrorChanged();
+  void adbDevicesChanged();
+  void adbDeviceQueryErrorChanged();
+  void dockerContainersChanged();
+  void dockerContainerQueryErrorChanged();
   void currentOpenLogIndexChanged();
   void currentOpenLogSourceUrlChanged();
   void currentLogModelChanged();
@@ -145,6 +196,9 @@ class AppEngine : public QObject {
   int openLogSourceInternal(const QUrl& url, bool add_to_recent);
   void addRecentLogSource(const QUrl& url);
   void loadRecentLogSources();
+  void addRecentPipeStream(const QUrl& url);
+  void removeRecentPipeStream(const QUrl& url);
+  void loadRecentPipeStreams();
   void updateCurrentLogModel();
 
   struct ModelEntry {
@@ -156,7 +210,15 @@ class AppEngine : public QObject {
 
   OpenLogsModel open_logs_{this};
   RecentLogsModel recent_logs_{this};
+  RecentLogsModel recent_pipe_streams_{this};
+  AdbCandidatesModel adb_candidates_{this};
+  AdbDevicesModel adb_devices_{this};
+  DockerContainersModel docker_containers_{this};
   QHash<QUrl, ModelEntry> models_;
+  QString adb_scan_error_;
+  QString adb_device_query_error_;
+  QString docker_executable_;
+  QString docker_container_query_error_;
   int current_open_log_index_{-1};
   QUrl current_open_log_source_url_;
   QPointer<LogModel> current_log_model_;

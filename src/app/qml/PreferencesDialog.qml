@@ -35,6 +35,11 @@ Dialog {
                 text: qsTr("Colors")
                 width: implicitWidth
             }
+
+            TabButton {
+                text: qsTr("Adb")
+                width: implicitWidth
+            }
         }
 
         StackLayout {
@@ -62,6 +67,13 @@ Dialog {
                     anchors.fill: parent
                 }
             }
+
+            Item {
+                AdbSettings {
+                    id: adbSettings
+                    anchors.fill: parent
+                }
+            }
         }
     }
 
@@ -69,6 +81,7 @@ Dialog {
         generalSettings.commit()
         loggingSettings.commit()
         colorSettings.commit()
+        adbSettings.commit()
         close()
     }
 
@@ -76,10 +89,12 @@ Dialog {
         generalSettings.reload()
         loggingSettings.reload()
         colorSettings.reload()
+        adbSettings.reload()
     }
     onRejected: {
         generalSettings.revert()
         colorSettings.revert()
+        adbSettings.revert()
         close()
     }
 }

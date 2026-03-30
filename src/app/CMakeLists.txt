@@ -8,6 +8,7 @@ qt_add_qml_module(lgx_app
   QML_FILES
     Main.qml
     qml/AboutDialog.qml
+    qml/AdbSettings.qml
     qml/ColorSettings.qml
     qml/FilterView.qml
     qml/LogLineList.qml

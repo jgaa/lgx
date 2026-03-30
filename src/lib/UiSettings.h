@@ -19,6 +19,7 @@ class UiSettings : public QObject {
   Q_PROPERTY(int logZoomPercent READ logZoomPercent WRITE setLogZoomPercent NOTIFY logZoomPercentChanged)
   Q_PROPERTY(int effectiveLogFontPixelSize READ effectiveLogFontPixelSize NOTIFY effectiveLogFontPixelSizeChanged)
   Q_PROPERTY(bool followLiveLogsByDefault READ followLiveLogsByDefault WRITE setFollowLiveLogsByDefault NOTIFY followLiveLogsByDefaultChanged)
+  Q_PROPERTY(QString adbExecutablePath READ adbExecutablePath WRITE setAdbExecutablePath NOTIFY adbExecutablePathChanged)
   Q_PROPERTY(QVariantList logLevelStyles READ logLevelStyles NOTIFY logLevelStylesChanged)
   Q_PROPERTY(int logLevelStylesRevision READ logLevelStylesRevision NOTIFY logLevelStylesChanged)
   Q_PROPERTY(int lineMarkColorsRevision READ lineMarkColorsRevision NOTIFY lineMarkColorsChanged)
@@ -38,6 +39,7 @@ class UiSettings : public QObject {
   [[nodiscard]] int logZoomPercent() const noexcept;
   [[nodiscard]] int effectiveLogFontPixelSize() const noexcept;
   [[nodiscard]] bool followLiveLogsByDefault() const noexcept;
+  [[nodiscard]] QString adbExecutablePath() const noexcept;
   [[nodiscard]] QVariantList logLevelStyles() const;
   [[nodiscard]] int logLevelStylesRevision() const noexcept;
   [[nodiscard]] int lineMarkColorsRevision() const noexcept;
@@ -50,6 +52,7 @@ class UiSettings : public QObject {
   Q_INVOKABLE void setLogBaseFontPixelSize(int pixel_size);
   Q_INVOKABLE void setLogZoomPercent(int percent);
   Q_INVOKABLE void setFollowLiveLogsByDefault(bool enabled);
+  Q_INVOKABLE void setAdbExecutablePath(const QString& path);
   Q_INVOKABLE QString logLevelForegroundColor(int level) const;
   Q_INVOKABLE QString logLevelBackgroundColor(int level) const;
   Q_INVOKABLE QString lineMarkColor(int color) const;
@@ -65,6 +68,7 @@ signals:
   void logZoomPercentChanged();
   void effectiveLogFontPixelSizeChanged();
   void followLiveLogsByDefaultChanged();
+  void adbExecutablePathChanged();
   void logLevelStylesChanged();
   void lineMarkColorsChanged();
 
@@ -87,6 +91,7 @@ signals:
   int log_base_font_pixel_size_{13};
   int log_zoom_percent_{100};
   bool follow_live_logs_by_default_{true};
+  QString adb_executable_path_;
   std::array<QString, number_of_log_levels> log_level_foreground_colors_{};
   std::array<QString, number_of_log_levels> log_level_background_colors_{};
   int log_level_styles_revision_{0};
