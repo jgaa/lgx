@@ -49,6 +49,10 @@ FileSource::FileSource(std::shared_ptr<IFileMonitor> file_monitor)
     : file_monitor_(std::move(file_monitor)),
       scanner_(createDefaultLogScanner()) {}
 
+FileSource::~FileSource() {
+  close();
+}
+
 std::string FileSource::path() const {
   return path_.string();
 }
@@ -70,11 +74,17 @@ void FileSource::open(const std::string& path) {
   scanned_size_ = 0;
   file_identity_ = info.identity;
   has_identity_ = true;
+  open_ = true;
   startWatching();
   setState(SourceState::Idle);
 }
 
 void FileSource::close() {
+  if (!open_ && path_.empty() && lines_.empty() && pageMetadata().empty()) {
+    return;
+  }
+
+  open_ = false;
   stopWatching();
   invalidateAllPages();
 

@@ -83,6 +83,9 @@ class PipeStreamProvider final : public IStreamProvider {
       return;
     }
 
+    callbacks_ = {};
+    QObject::disconnect(&process_, nullptr, &process_, nullptr);
+    process_.blockSignals(true);
     process_.terminate();
     if (!process_.waitForFinished(500)) {
       process_.kill();
@@ -148,6 +151,9 @@ class DockerStreamProvider final : public IStreamProvider {
       return;
     }
 
+    callbacks_ = {};
+    QObject::disconnect(&process_, nullptr, &process_, nullptr);
+    process_.blockSignals(true);
     process_.terminate();
     if (!process_.waitForFinished(500)) {
       process_.kill();
@@ -222,6 +228,9 @@ class AdbLogcatProvider final : public IStreamProvider {
       return;
     }
 
+    callbacks_ = {};
+    QObject::disconnect(&process_, nullptr, &process_, nullptr);
+    process_.blockSignals(true);
     process_.terminate();
     if (!process_.waitForFinished(500)) {
       process_.kill();
@@ -425,17 +434,26 @@ void StreamSource::open(const std::string& path) {
   spool_source_.open(spool_path_.toStdString());
   LOG_INFO << "Stream spool file ready at '" << spool_path_.toStdString() << "'";
   provider_->start();
+  open_ = true;
 }
 
 void StreamSource::close() {
+  if (!open_ && !provider_ && spool_path_.isEmpty() && !spool_file_.isOpen()
+      && pending_bytes_.isEmpty()) {
+    return;
+  }
+
+  open_ = false;
   flush_timer_.stop();
   if (provider_) {
+    provider_->setCallbacks({});
     provider_->stop();
   }
 
   pending_bytes_.clear();
   failed_ = false;
   provider_.reset();
+  spool_source_.setCallbacks({});
   spool_source_.close();
   if (spool_file_.isOpen()) {
     spool_file_.close();

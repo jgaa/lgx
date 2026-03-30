@@ -62,6 +62,7 @@ class LogModel final : public QAbstractListModel {
   Q_ENUM(Role)
 
   explicit LogModel(QUrl source_url, QObject* parent = nullptr);
+  ~LogModel() override;
 
   [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
   [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -88,6 +89,7 @@ class LogModel final : public QAbstractListModel {
   [[nodiscard]] QString requestedScannerName() const;
   [[nodiscard]] double linesPerSecond() const noexcept;
   [[nodiscard]] qulonglong fileSize() const noexcept;
+  void setCurrent(bool current);
 
   /**
    * @brief Replace all model rows.
@@ -146,6 +148,7 @@ signals:
   void refreshSourceMetrics();
   void replaceRowsFromSource();
   void appendRowsFromSource(uint64_t first_line, uint64_t count);
+  void syncRowsFromSourceSnapshot();
   void setState(State state);
 
   QUrl source_url_;
@@ -155,6 +158,7 @@ signals:
   bool reset_pending_{false};
   bool following_{false};
   bool active_{false};
+  bool current_{false};
   double lines_per_second_{0.0};
   qulonglong file_size_{0};
   QTimer active_timer_;

@@ -173,6 +173,7 @@ ApplicationWindow {
     function openDockerContainersDialog() {
         dockerSelectionMap = ({})
         AppEngine.refreshDockerContainers()
+        AppEngine.logUiTrace("openDockerContainersDialog opened")
         openDockerContainersDialogBox.open()
     }
 
@@ -225,6 +226,9 @@ ApplicationWindow {
     }
 
     function toggleDockerSelection(containerId, containerName, checked) {
+        AppEngine.logUiTrace("toggleDockerSelection containerId='" + containerId
+                             + "' name='" + containerName
+                             + "' checked=" + checked)
         const nextSelection = Object.assign({}, dockerSelectionMap)
         if (checked) {
             nextSelection[containerId] = containerName
@@ -232,6 +236,7 @@ ApplicationWindow {
             delete nextSelection[containerId]
         }
         dockerSelectionMap = nextSelection
+        AppEngine.logUiTrace("dockerSelectionMap keys=[" + Object.keys(dockerSelectionMap).join(", ") + "]")
     }
 
     function selectedDockerContainerCount() {
@@ -240,14 +245,19 @@ ApplicationWindow {
 
     function openDockerContainersFromDialog() {
         const containerIds = Object.keys(dockerSelectionMap)
+        AppEngine.logUiTrace("openDockerContainersFromDialog containerIds=[" + containerIds.join(", ") + "]")
         if (containerIds.length === 0) {
+            AppEngine.logUiTrace("openDockerContainersFromDialog aborted: no selected containers")
             return
         }
 
         let lastIndex = -1
         for (let i = 0; i < containerIds.length; ++i) {
             const containerId = containerIds[i]
+            AppEngine.logUiTrace("opening docker container id='" + containerId
+                                 + "' name='" + dockerSelectionMap[containerId] + "'")
             lastIndex = AppEngine.openDockerContainerStream(containerId, dockerSelectionMap[containerId])
+            AppEngine.logUiTrace("openDockerContainerStream result=" + lastIndex)
         }
         if (lastIndex >= 0) {
             tabBar.currentIndex = lastIndex
@@ -1045,7 +1055,10 @@ ApplicationWindow {
         width: 720
         height: 520
 
-        onAccepted: window.openDockerContainersFromDialog()
+        onAccepted: {
+            AppEngine.logUiTrace("openDockerContainersDialog accepted")
+            window.openDockerContainersFromDialog()
+        }
 
         contentItem: ColumnLayout {
             spacing: 10
@@ -1092,7 +1105,19 @@ ApplicationWindow {
                         required property string name
                         required property string image
                         required property string status
-                        property bool checkBoxInteraction: false
+
+                        readonly property bool selected: !!window.dockerSelectionMap[dockerDelegate.containerId]
+
+                        function applySelection(checked) {
+                            window.toggleDockerSelection(
+                                        dockerDelegate.containerId,
+                                        dockerDelegate.name,
+                                        checked)
+                        }
+
+                        function toggleSelection() {
+                            applySelection(!dockerDelegate.selected)
+                        }
 
                         width: ListView.view.width
                         padding: 10
@@ -1102,16 +1127,8 @@ ApplicationWindow {
 
                             CheckBox {
                                 id: dockerCheck
-                                checked: !!window.dockerSelectionMap[dockerDelegate.containerId]
-                                onPressedChanged: {
-                                    if (pressed) {
-                                        dockerDelegate.checkBoxInteraction = true
-                                    }
-                                }
-                                onToggled: window.toggleDockerSelection(
-                                               dockerDelegate.containerId,
-                                               dockerDelegate.name,
-                                               checked)
+                                checked: dockerDelegate.selected
+                                onClicked: dockerDelegate.applySelection(checked)
                             }
 
                             ColumnLayout {
@@ -1141,13 +1158,7 @@ ApplicationWindow {
                             }
                         }
 
-                        onClicked: {
-                            if (dockerDelegate.checkBoxInteraction) {
-                                dockerDelegate.checkBoxInteraction = false
-                                return
-                            }
-                            dockerCheck.toggle()
-                        }
+                        onClicked: dockerDelegate.toggleSelection()
                     }
                 }
             }

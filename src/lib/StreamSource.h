@@ -107,6 +107,7 @@ class StreamSource final : public LogSource {
   std::unique_ptr<IStreamProvider> provider_;
   bool following_{false};
   bool failed_{false};
+  bool open_{false};
 };
 
 }  // namespace lgx

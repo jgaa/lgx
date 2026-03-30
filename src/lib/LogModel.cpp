@@ -41,6 +41,18 @@ LogModel::LogModel(QUrl source_url, QObject* parent)
   });
 }
 
+LogModel::~LogModel() {
+  active_timer_.stop();
+  source_metrics_timer_.stop();
+  current_ = false;
+  active_ = false;
+
+  if (source_) {
+    source_->setCallbacks({});
+    source_.reset();
+  }
+}
+
 int LogModel::rowCount(const QModelIndex& parent) const {
   if (parent.isValid()) {
     return 0;
@@ -222,6 +234,26 @@ void LogModel::setRequestedScannerName(const QString& name) {
   emit scannerNameChanged();
 }
 
+void LogModel::setCurrent(bool current) {
+  if (current_ == current) {
+    if (current_) {
+      refreshSourceMetrics();
+      syncRowsFromSourceSnapshot();
+    }
+    return;
+  }
+
+  current_ = current;
+  if (!current_) {
+    source_metrics_timer_.stop();
+    return;
+  }
+
+  source_metrics_timer_.start();
+  refreshSourceMetrics();
+  syncRowsFromSourceSnapshot();
+}
+
 LineMarkColor LogModel::normalizedMarkColor(int color) const noexcept {
   const auto clamped = std::clamp(color, static_cast<int>(LineMark_Default),
                                   static_cast<int>(LineMark_Accent6));
@@ -312,6 +344,10 @@ void LogModel::markFailed() {
 }
 
 void LogModel::setSource(std::unique_ptr<LogSource> source) {
+  if (source_) {
+    source_->setCallbacks({});
+    source_.reset();
+  }
   source_ = std::move(source);
   if (!source_) {
     source_metrics_timer_.stop();
@@ -335,11 +371,12 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
       .on_state_changed =
           [this](SourceSnapshot snapshot) {
             emit scannerNameChanged();
-            if (!qFuzzyCompare(lines_per_second_ + 1.0, snapshot.lines_per_second + 1.0)) {
+            if (current_
+                && !qFuzzyCompare(lines_per_second_ + 1.0, snapshot.lines_per_second + 1.0)) {
               lines_per_second_ = snapshot.lines_per_second;
               emit linesPerSecondChanged();
             }
-            if (file_size_ != snapshot.file_size) {
+            if (current_ && file_size_ != snapshot.file_size) {
               file_size_ = snapshot.file_size;
               emit fileSizeChanged();
             }
@@ -347,7 +384,7 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
               markFailed();
             }
             if (snapshot.state == SourceState::Ready) {
-              if (reset_pending_) {
+              if (current_ && reset_pending_) {
                 reset_pending_ = false;
                 appendRowsFromSource(0, snapshot.line_count);
               }
@@ -356,26 +393,36 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
           },
       .on_lines_appended =
           [this](uint64_t first_new_line, uint64_t count) {
-            appendRowsFromSource(first_new_line, count);
+            if (current_) {
+              appendRowsFromSource(first_new_line, count);
+            }
             markActiveForRecentLines();
-            refreshSourceMetrics();
+            if (current_) {
+              refreshSourceMetrics();
+            }
           },
       .on_reset =
           [this](SourceResetReason) {
             reset_pending_ = true;
             setActive(false);
-            refreshSourceMetrics();
-            setRows({});
+            if (current_) {
+              refreshSourceMetrics();
+              setRows({});
+            }
           },
       .on_error =
           [this](std::string) {
             setActive(false);
-            refreshSourceMetrics();
+            if (current_) {
+              refreshSourceMetrics();
+            }
             markFailed();
           },
   });
 
-  source_metrics_timer_.start();
+  if (current_) {
+    source_metrics_timer_.start();
+  }
   refreshSourceMetrics();
   emit followingChanged();
   emit scannerNameChanged();
@@ -401,6 +448,9 @@ void LogModel::replaceRowsFromSource() {
     setRows({});
     return;
   }
+  if (!current_) {
+    return;
+  }
 
   std::vector<LogRow> rows;
   const auto snapshot = source_->snapshot();
@@ -415,7 +465,7 @@ void LogModel::replaceRowsFromSource() {
 }
 
 void LogModel::appendRowsFromSource(uint64_t first_line, uint64_t count) {
-  if (!source_ || count == 0) {
+  if (!source_ || !current_ || count == 0) {
     return;
   }
 
@@ -453,6 +503,31 @@ void LogModel::refreshSourceMetrics() {
   if (file_size_ != next_file_size) {
     file_size_ = next_file_size;
     emit fileSizeChanged();
+  }
+}
+
+void LogModel::syncRowsFromSourceSnapshot() {
+  if (!source_ || !current_) {
+    return;
+  }
+
+  const auto snapshot = source_->snapshot();
+  if (snapshot.state == SourceState::Failed) {
+    markFailed();
+    return;
+  }
+
+  const auto snapshot_line_count = static_cast<size_t>(snapshot.line_count);
+  if (reset_pending_ || snapshot_line_count < rows_.size()) {
+    reset_pending_ = false;
+    replaceRowsFromSource();
+  } else if (snapshot_line_count > rows_.size()) {
+    appendRowsFromSource(static_cast<uint64_t>(rows_.size()),
+                         static_cast<uint64_t>(snapshot_line_count - rows_.size()));
+  }
+
+  if (snapshot.state == SourceState::Ready) {
+    markReady();
   }
 }
 

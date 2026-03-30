@@ -11,6 +11,8 @@ ScrollView {
     property int originalLogBaseFontPixelSize: UiSettings.logBaseFontPixelSize
     property int originalLogZoomPercent: UiSettings.logZoomPercent
     property bool originalFollowLiveLogsByDefault: UiSettings.followLiveLogsByDefault
+    property int originalFollowScrollIntervalMs: UiSettings.followScrollIntervalMs
+    property int originalFollowHighRateScrollIntervalMs: UiSettings.followHighRateScrollIntervalMs
 
     Settings {
         id: settings
@@ -48,7 +50,11 @@ ScrollView {
         originalLogBaseFontPixelSize = UiSettings.logBaseFontPixelSize
         originalLogZoomPercent = UiSettings.logZoomPercent
         originalFollowLiveLogsByDefault = UiSettings.followLiveLogsByDefault
+        originalFollowScrollIntervalMs = UiSettings.followScrollIntervalMs
+        originalFollowHighRateScrollIntervalMs = UiSettings.followHighRateScrollIntervalMs
         followLiveLogsByDefaultCheck.checked = UiSettings.followLiveLogsByDefault
+        followScrollIntervalSpin.value = UiSettings.followScrollIntervalMs
+        followHighRateScrollIntervalSpin.value = UiSettings.followHighRateScrollIntervalMs
         syncAppearanceControls()
     }
 
@@ -57,7 +63,11 @@ ScrollView {
         UiSettings.setLogBaseFontPixelSize(originalLogBaseFontPixelSize)
         UiSettings.setLogZoomPercent(originalLogZoomPercent)
         UiSettings.setFollowLiveLogsByDefault(originalFollowLiveLogsByDefault)
+        UiSettings.setFollowScrollIntervalMs(originalFollowScrollIntervalMs)
+        UiSettings.setFollowHighRateScrollIntervalMs(originalFollowHighRateScrollIntervalMs)
         followLiveLogsByDefaultCheck.checked = UiSettings.followLiveLogsByDefault
+        followScrollIntervalSpin.value = UiSettings.followScrollIntervalMs
+        followHighRateScrollIntervalSpin.value = UiSettings.followHighRateScrollIntervalMs
         syncAppearanceControls()
     }
 
@@ -161,6 +171,54 @@ ScrollView {
                         text: qsTr("Follow live logs automatically")
                         checked: UiSettings.followLiveLogsByDefault
                         onToggled: UiSettings.setFollowLiveLogsByDefault(checked)
+                    }
+
+                    Label {
+                        text: qsTr("Follow Scroll")
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        SpinBox {
+                            id: followScrollIntervalSpin
+                            Layout.fillWidth: true
+                            from: 50
+                            to: 60000
+                            stepSize: 50
+                            editable: true
+                            value: UiSettings.followScrollIntervalMs
+                            onValueModified: UiSettings.setFollowScrollIntervalMs(value)
+                        }
+
+                        Label {
+                            text: qsTr("ms")
+                            color: palette.mid
+                        }
+                    }
+
+                    Label {
+                        text: qsTr("Follow Scroll Above 500 lps")
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        SpinBox {
+                            id: followHighRateScrollIntervalSpin
+                            Layout.fillWidth: true
+                            from: 50
+                            to: 60000
+                            stepSize: 100
+                            editable: true
+                            value: UiSettings.followHighRateScrollIntervalMs
+                            onValueModified: UiSettings.setFollowHighRateScrollIntervalMs(value)
+                        }
+
+                        Label {
+                            text: qsTr("ms")
+                            color: palette.mid
+                        }
                     }
                 }
             }

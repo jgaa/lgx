@@ -21,6 +21,10 @@ Item {
     readonly property real fileSize: logModel ? logModel.fileSize : 0
     readonly property bool hasSelection: lineList.hasSelection
     readonly property string selectedText: lineList.selectedText
+    readonly property bool followScrollTimerEnabled: visible && !!logModel && following && lineList.lineCount > 0
+    readonly property int followScrollIntervalMs: linesPerSecond > 500
+        ? UiSettings.followHighRateScrollIntervalMs
+        : UiSettings.followScrollIntervalMs
     readonly property string displaySourceText: {
         if (!sourceUrl) {
             return ""
@@ -231,6 +235,11 @@ Item {
     onSourceUrlChanged: acquireLogModel()
     onWorkspaceChanged: registerWithWorkspace()
     onFollowingChanged: ensureFollowingAtEnd()
+    onVisibleChanged: {
+        if (visible) {
+            ensureFollowingAtEnd()
+        }
+    }
     Component.onCompleted: {
         acquireLogModel()
         registerWithWorkspace()
@@ -259,6 +268,13 @@ Item {
             UiSettings.stepLogZoom(event.angleDelta.y > 0 ? 1 : -1)
             event.accepted = true
         }
+    }
+
+    Timer {
+        interval: Math.max(1, root.followScrollIntervalMs)
+        repeat: true
+        running: root.followScrollTimerEnabled
+        onTriggered: root.ensureFollowingAtEnd()
     }
 
     LogLineList {

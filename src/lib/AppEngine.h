@@ -56,6 +56,7 @@ class AppEngine : public QObject {
 
  public:
   explicit AppEngine(QObject* parent = nullptr);
+  ~AppEngine() override;
 
   /**
    * @brief Access the singleton application engine.

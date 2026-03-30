@@ -189,6 +189,28 @@ AppEngine::AppEngine(QObject* parent)
   loadRecentPipeStreams();
 }
 
+AppEngine::~AppEngine() {
+  current_log_model_ = nullptr;
+
+  const auto filter_models = findChildren<FilterModel*>(QString{}, Qt::FindDirectChildrenOnly);
+  for (auto* model : filter_models) {
+    delete model;
+  }
+
+  const auto marked_models = findChildren<MarkedModel*>(QString{}, Qt::FindDirectChildrenOnly);
+  for (auto* model : marked_models) {
+    delete model;
+  }
+
+  const auto model_entries = std::move(models_);
+  models_.clear();
+  for (const auto& entry : model_entries) {
+    if (entry.model) {
+      delete entry.model;
+    }
+  }
+}
+
 AppEngine& AppEngine::instance() {
   static AppEngine instance;
   return instance;
@@ -324,12 +346,21 @@ int AppEngine::openPipeStream(const QString& command, bool include_stdout, bool 
 
 int AppEngine::openDockerContainerStream(const QString& container_id,
                                          const QString& container_name) {
+  LOG_INFO << "Request to open Docker stream for container='"
+           << container_id.trimmed().toStdString()
+           << "' name='" << container_name.trimmed().toStdString() << "'";
   if (!dockerAvailable() || container_id.trimmed().isEmpty()) {
+    LOG_WARN << "Rejecting Docker stream open request. dockerAvailable="
+             << (dockerAvailable() ? "true" : "false")
+             << " containerIdEmpty=" << (container_id.trimmed().isEmpty() ? "true" : "false");
     return -1;
   }
 
-  return openLogSourceInternal(
-      StreamSource::makeDockerUrl(container_id.trimmed(), container_name.trimmed()), false);
+  const auto url = StreamSource::makeDockerUrl(container_id.trimmed(), container_name.trimmed());
+  LOG_INFO << "Created Docker stream URL '" << url.toString().toStdString() << "'";
+  const auto index = openLogSourceInternal(url, false);
+  LOG_INFO << "Open Docker stream resolved to tab index=" << index;
+  return index;
 }
 
 int AppEngine::openAdbLogcatStream(const QString& serial, const QString& name) {
@@ -662,6 +693,7 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
 
   auto* model = new LogModel(canonical, this);
   QQmlEngine::setObjectOwnership(model, QQmlEngine::CppOwnership);
+  model->setCurrent(canonical == current_open_log_source_url_);
 
   if (canonical.isLocalFile()) {
     auto source = std::make_unique<FileSource>();
@@ -778,6 +810,7 @@ void AppEngine::updateCurrentLogModel() {
 
   const auto canonical_next_source_url = canonicalUrl(next_source_url);
   if (current_open_log_source_url_ == canonical_next_source_url && current_log_model_) {
+    current_log_model_->setCurrent(!canonical_next_source_url.isEmpty());
     return;
   }
 
@@ -786,6 +819,12 @@ void AppEngine::updateCurrentLogModel() {
 
   current_open_log_source_url_ = canonical_next_source_url;
   current_log_model_ = qobject_cast<LogModel*>(createLogModel(canonical_next_source_url));
+  if (previous_model && previous_model != current_log_model_) {
+    previous_model->setCurrent(false);
+  }
+  if (current_log_model_) {
+    current_log_model_->setCurrent(true);
+  }
 
   if (previous_source_url.isValid() && !previous_source_url.isEmpty()) {
     releaseLogModel(previous_source_url);

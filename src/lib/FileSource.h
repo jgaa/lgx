@@ -24,6 +24,7 @@ namespace lgx {
 class FileSource final : public LogSource {
  public:
   explicit FileSource(std::shared_ptr<IFileMonitor> file_monitor = createFallbackFileMonitor());
+  ~FileSource() override;
 
   [[nodiscard]] std::string path() const override;
   void open(const std::string& path) override;
@@ -102,6 +103,7 @@ class FileSource final : public LogSource {
   std::unique_ptr<IFileWatch> directory_watch_;
   std::unique_ptr<LogFormatScanner> scanner_;
   std::string requested_scanner_name_{"Auto"};
+  bool open_{false};
 };
 
 }  // namespace lgx

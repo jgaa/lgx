@@ -19,6 +19,8 @@ class UiSettings : public QObject {
   Q_PROPERTY(int logZoomPercent READ logZoomPercent WRITE setLogZoomPercent NOTIFY logZoomPercentChanged)
   Q_PROPERTY(int effectiveLogFontPixelSize READ effectiveLogFontPixelSize NOTIFY effectiveLogFontPixelSizeChanged)
   Q_PROPERTY(bool followLiveLogsByDefault READ followLiveLogsByDefault WRITE setFollowLiveLogsByDefault NOTIFY followLiveLogsByDefaultChanged)
+  Q_PROPERTY(int followScrollIntervalMs READ followScrollIntervalMs WRITE setFollowScrollIntervalMs NOTIFY followScrollIntervalMsChanged)
+  Q_PROPERTY(int followHighRateScrollIntervalMs READ followHighRateScrollIntervalMs WRITE setFollowHighRateScrollIntervalMs NOTIFY followHighRateScrollIntervalMsChanged)
   Q_PROPERTY(QString adbExecutablePath READ adbExecutablePath WRITE setAdbExecutablePath NOTIFY adbExecutablePathChanged)
   Q_PROPERTY(QVariantList logLevelStyles READ logLevelStyles NOTIFY logLevelStylesChanged)
   Q_PROPERTY(int logLevelStylesRevision READ logLevelStylesRevision NOTIFY logLevelStylesChanged)
@@ -39,6 +41,8 @@ class UiSettings : public QObject {
   [[nodiscard]] int logZoomPercent() const noexcept;
   [[nodiscard]] int effectiveLogFontPixelSize() const noexcept;
   [[nodiscard]] bool followLiveLogsByDefault() const noexcept;
+  [[nodiscard]] int followScrollIntervalMs() const noexcept;
+  [[nodiscard]] int followHighRateScrollIntervalMs() const noexcept;
   [[nodiscard]] QString adbExecutablePath() const noexcept;
   [[nodiscard]] QVariantList logLevelStyles() const;
   [[nodiscard]] int logLevelStylesRevision() const noexcept;
@@ -52,6 +56,8 @@ class UiSettings : public QObject {
   Q_INVOKABLE void setLogBaseFontPixelSize(int pixel_size);
   Q_INVOKABLE void setLogZoomPercent(int percent);
   Q_INVOKABLE void setFollowLiveLogsByDefault(bool enabled);
+  Q_INVOKABLE void setFollowScrollIntervalMs(int interval_ms);
+  Q_INVOKABLE void setFollowHighRateScrollIntervalMs(int interval_ms);
   Q_INVOKABLE void setAdbExecutablePath(const QString& path);
   Q_INVOKABLE QString logLevelForegroundColor(int level) const;
   Q_INVOKABLE QString logLevelBackgroundColor(int level) const;
@@ -68,6 +74,8 @@ signals:
   void logZoomPercentChanged();
   void effectiveLogFontPixelSizeChanged();
   void followLiveLogsByDefaultChanged();
+  void followScrollIntervalMsChanged();
+  void followHighRateScrollIntervalMsChanged();
   void adbExecutablePathChanged();
   void logLevelStylesChanged();
   void lineMarkColorsChanged();
@@ -77,6 +85,7 @@ signals:
   [[nodiscard]] QString defaultLogFontFamily() const;
   [[nodiscard]] int clampBaseFontPixelSize(int pixel_size) const noexcept;
   [[nodiscard]] int clampZoomPercent(int percent) const noexcept;
+  [[nodiscard]] int clampFollowScrollIntervalMs(int interval_ms) const noexcept;
   [[nodiscard]] size_t colorIndexForLevel(int level) const noexcept;
   [[nodiscard]] size_t colorIndexForMark(int color) const noexcept;
   [[nodiscard]] QString colorForLevel(const std::array<QString, number_of_log_levels>& colors, int level) const;
@@ -91,6 +100,8 @@ signals:
   int log_base_font_pixel_size_{13};
   int log_zoom_percent_{100};
   bool follow_live_logs_by_default_{true};
+  int follow_scroll_interval_ms_{300};
+  int follow_high_rate_scroll_interval_ms_{5000};
   QString adb_executable_path_;
   std::array<QString, number_of_log_levels> log_level_foreground_colors_{};
   std::array<QString, number_of_log_levels> log_level_background_colors_{};

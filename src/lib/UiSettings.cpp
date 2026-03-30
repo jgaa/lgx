@@ -14,6 +14,8 @@ constexpr auto kLogFontFamilyKey = "ui/log/fontFamily";
 constexpr auto kLogBaseFontPixelSizeKey = "ui/log/baseFontPixelSize";
 constexpr auto kLogZoomPercentKey = "ui/log/zoomPercent";
 constexpr auto kFollowLiveLogsByDefaultKey = "ui/log/followLiveLogsByDefault";
+constexpr auto kFollowScrollIntervalMsKey = "ui/log/followScrollIntervalMs";
+constexpr auto kFollowHighRateScrollIntervalMsKey = "ui/log/followHighRateScrollIntervalMs";
 constexpr auto kAdbExecutablePathKey = "ui/adb/executablePath";
 constexpr int kDefaultLogBaseFontPixelSize = 13;
 constexpr int kMinLogBaseFontPixelSize = 8;
@@ -22,6 +24,10 @@ constexpr int kDefaultLogZoomPercent = 100;
 constexpr int kMinLogZoomPercent = 50;
 constexpr int kMaxLogZoomPercent = 400;
 constexpr int kLogZoomStepPercent = 10;
+constexpr int kDefaultFollowScrollIntervalMs = 300;
+constexpr int kDefaultFollowHighRateScrollIntervalMs = 5000;
+constexpr int kMinFollowScrollIntervalMs = 50;
+constexpr int kMaxFollowScrollIntervalMs = 60'000;
 
 struct LineMarkStyleDefinition {
   LineMarkColor color;
@@ -90,6 +96,11 @@ UiSettings::UiSettings(QObject* parent)
       settings.value(QLatin1StringView{kLogZoomPercentKey}, kDefaultLogZoomPercent).toInt());
   follow_live_logs_by_default_ =
       settings.value(QLatin1StringView{kFollowLiveLogsByDefaultKey}, true).toBool();
+  follow_scroll_interval_ms_ = clampFollowScrollIntervalMs(
+      settings.value(QLatin1StringView{kFollowScrollIntervalMsKey}, kDefaultFollowScrollIntervalMs).toInt());
+  follow_high_rate_scroll_interval_ms_ = clampFollowScrollIntervalMs(
+      settings.value(QLatin1StringView{kFollowHighRateScrollIntervalMsKey}, kDefaultFollowHighRateScrollIntervalMs)
+          .toInt());
   adb_executable_path_ =
       settings.value(QLatin1StringView{kAdbExecutablePathKey}, QString{}).toString().trimmed();
 
@@ -140,6 +151,14 @@ int UiSettings::effectiveLogFontPixelSize() const noexcept {
 
 bool UiSettings::followLiveLogsByDefault() const noexcept {
   return follow_live_logs_by_default_;
+}
+
+int UiSettings::followScrollIntervalMs() const noexcept {
+  return follow_scroll_interval_ms_;
+}
+
+int UiSettings::followHighRateScrollIntervalMs() const noexcept {
+  return follow_high_rate_scroll_interval_ms_;
 }
 
 QString UiSettings::adbExecutablePath() const noexcept {
@@ -232,6 +251,28 @@ void UiSettings::setFollowLiveLogsByDefault(bool enabled) {
   emit followLiveLogsByDefaultChanged();
 }
 
+void UiSettings::setFollowScrollIntervalMs(int interval_ms) {
+  const int clamped = clampFollowScrollIntervalMs(interval_ms);
+  if (follow_scroll_interval_ms_ == clamped) {
+    return;
+  }
+
+  follow_scroll_interval_ms_ = clamped;
+  saveValue(QLatin1StringView{kFollowScrollIntervalMsKey}, follow_scroll_interval_ms_);
+  emit followScrollIntervalMsChanged();
+}
+
+void UiSettings::setFollowHighRateScrollIntervalMs(int interval_ms) {
+  const int clamped = clampFollowScrollIntervalMs(interval_ms);
+  if (follow_high_rate_scroll_interval_ms_ == clamped) {
+    return;
+  }
+
+  follow_high_rate_scroll_interval_ms_ = clamped;
+  saveValue(QLatin1StringView{kFollowHighRateScrollIntervalMsKey}, follow_high_rate_scroll_interval_ms_);
+  emit followHighRateScrollIntervalMsChanged();
+}
+
 void UiSettings::setAdbExecutablePath(const QString& path) {
   const auto trimmed = path.trimmed();
   if (adb_executable_path_ == trimmed) {
@@ -295,6 +336,10 @@ int UiSettings::clampBaseFontPixelSize(int pixel_size) const noexcept {
 
 int UiSettings::clampZoomPercent(int percent) const noexcept {
   return std::clamp(percent, kMinLogZoomPercent, kMaxLogZoomPercent);
+}
+
+int UiSettings::clampFollowScrollIntervalMs(int interval_ms) const noexcept {
+  return std::clamp(interval_ms, kMinFollowScrollIntervalMs, kMaxFollowScrollIntervalMs);
 }
 
 size_t UiSettings::colorIndexForLevel(int level) const noexcept {
