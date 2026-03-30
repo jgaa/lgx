@@ -12,6 +12,7 @@
 
 #include <algorithm>
 
+#include "FilterModel.h"
 #include "FileSource.h"
 #include "LogScanner.h"
 #include "UiSettings.h"
@@ -28,6 +29,9 @@ AppEngine::AppEngine(QObject* parent)
   connect(&open_logs_, &QAbstractItemModel::rowsInserted, this, &AppEngine::openLogCountChanged);
   connect(&open_logs_, &QAbstractItemModel::rowsRemoved, this, &AppEngine::openLogCountChanged);
   connect(&open_logs_, &QAbstractItemModel::modelReset, this, &AppEngine::openLogCountChanged);
+  connect(&open_logs_, &QAbstractItemModel::rowsInserted, this, [this]() { updateCurrentLogModel(); });
+  connect(&open_logs_, &QAbstractItemModel::rowsRemoved, this, [this]() { updateCurrentLogModel(); });
+  connect(&open_logs_, &QAbstractItemModel::modelReset, this, [this]() { updateCurrentLogModel(); });
   loadRecentLogSources();
 }
 
@@ -56,6 +60,31 @@ QStringList AppEngine::logScanners() const {
   return availableLogScannerNames();
 }
 
+int AppEngine::currentOpenLogIndex() const noexcept {
+  return current_open_log_index_;
+}
+
+QUrl AppEngine::currentOpenLogSourceUrl() const {
+  return current_open_log_source_url_;
+}
+
+QObject* AppEngine::currentLogModel() const noexcept {
+  return current_log_model_;
+}
+
+void AppEngine::setCurrentOpenLogIndex(int index) {
+  const int normalized_index =
+      (index >= 0 && index < open_logs_.rowCount()) ? index : -1;
+  if (current_open_log_index_ == normalized_index) {
+    updateCurrentLogModel();
+    return;
+  }
+
+  current_open_log_index_ = normalized_index;
+  emit currentOpenLogIndexChanged();
+  updateCurrentLogModel();
+}
+
 int AppEngine::openLogSource(const QUrl& url) {
   return openLogSourceInternal(url, true);
 }
@@ -73,11 +102,21 @@ int AppEngine::openLogSourceInternal(const QUrl& url, bool add_to_recent) {
   return open_logs_.addOpenLog(canonical, titleForUrl(canonical));
 }
 
-int AppEngine::openLogFile() {
+int AppEngine::openLogFile(const QUrl& initial_url) {
+  QUrl initial_directory;
+  const auto canonical_initial = canonicalUrl(initial_url);
+  if (canonical_initial.isLocalFile()) {
+    const QFileInfo file_info(canonical_initial.toLocalFile());
+    const auto absolute_directory = file_info.absoluteDir().absolutePath();
+    if (!absolute_directory.isEmpty()) {
+      initial_directory = QUrl::fromLocalFile(absolute_directory);
+    }
+  }
+
   const auto selected = QFileDialog::getOpenFileUrl(
       nullptr,
       tr("Open Log File"),
-      {},
+      initial_directory,
       tr("Log files (*.log *.txt);;All files (*)"));
   if (!selected.isValid() || selected.isEmpty()) {
     return -1;
@@ -143,6 +182,17 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
   return model;
 }
 
+QObject* AppEngine::createFilterModel(const QUrl& url) {
+  auto* source_model = qobject_cast<LogModel*>(createLogModel(url));
+  if (!source_model) {
+    return nullptr;
+  }
+
+  auto* model = new FilterModel(source_model, this);
+  QQmlEngine::setObjectOwnership(model, QQmlEngine::CppOwnership);
+  return model;
+}
+
 void AppEngine::releaseLogModel(const QUrl& url) {
   const auto canonical = canonicalUrl(url);
   auto it = models_.find(canonical);
@@ -160,6 +210,17 @@ void AppEngine::releaseLogModel(const QUrl& url) {
     }
     models_.erase(it);
   }
+}
+
+void AppEngine::releaseFilterModel(QObject* model) {
+  auto* filter_model = qobject_cast<FilterModel*>(model);
+  if (!filter_model) {
+    return;
+  }
+
+  const QUrl source_url = filter_model->sourceUrl();
+  filter_model->deleteLater();
+  releaseLogModel(source_url);
 }
 
 LogModel* AppEngine::modelForUrl(const QUrl& url) const {
@@ -180,6 +241,35 @@ int AppEngine::retainCountForUrl(const QUrl& url) const {
   }
 
   return it->retain_count;
+}
+
+void AppEngine::updateCurrentLogModel() {
+  const QUrl next_source_url =
+      (current_open_log_index_ >= 0 && current_open_log_index_ < open_logs_.rowCount())
+          ? open_logs_.sourceUrlAt(current_open_log_index_)
+          : QUrl{};
+
+  const auto canonical_next_source_url = canonicalUrl(next_source_url);
+  if (current_open_log_source_url_ == canonical_next_source_url && current_log_model_) {
+    return;
+  }
+
+  const auto previous_source_url = current_open_log_source_url_;
+  auto* previous_model = current_log_model_.data();
+
+  current_open_log_source_url_ = canonical_next_source_url;
+  current_log_model_ = qobject_cast<LogModel*>(createLogModel(canonical_next_source_url));
+
+  if (previous_source_url.isValid() && !previous_source_url.isEmpty()) {
+    releaseLogModel(previous_source_url);
+  }
+
+  if (previous_model != current_log_model_) {
+    emit currentLogModelChanged();
+  }
+  if (previous_source_url != current_open_log_source_url_) {
+    emit currentOpenLogSourceUrlChanged();
+  }
 }
 
 void AppEngine::saveSessionState() const {

@@ -24,6 +24,7 @@ class LogModel final : public QAbstractListModel {
   Q_OBJECT
   Q_PROPERTY(State state READ state NOTIFY stateChanged)
   Q_PROPERTY(QUrl sourceUrl READ sourceUrl CONSTANT)
+  Q_PROPERTY(int lineCount READ rowCount NOTIFY lineCountChanged)
   Q_PROPERTY(bool following READ following WRITE setFollowing NOTIFY followingChanged)
   Q_PROPERTY(bool active READ active NOTIFY activeChanged)
   Q_PROPERTY(QString scannerName READ scannerName NOTIFY scannerNameChanged)
@@ -46,9 +47,12 @@ class LogModel final : public QAbstractListModel {
    * @brief Row roles exposed to QML delegates.
    */
   enum Role {
-    LineNoRole = Qt::UserRole + 1,
+    SourceRowRole = Qt::UserRole + 1,
+    LineNoRole,
     FunctionNameRole,
     LogLevelRole,
+    MarkedRole,
+    MarkColorRole,
     RawMessageRole,
     MessageRole,
     DateRole,
@@ -63,9 +67,14 @@ class LogModel final : public QAbstractListModel {
   [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
   [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
   Q_INVOKABLE QString plainTextAt(int row) const;
+  Q_INVOKABLE int sourceRowAt(int row) const;
+  Q_INVOKABLE int lineNoAt(int row) const;
   Q_INVOKABLE int logLevelAt(int row) const;
+  Q_INVOKABLE bool markedAt(int row) const;
+  Q_INVOKABLE int markColorAt(int row) const;
   Q_INVOKABLE int nextLineOfLevel(int row, int logLevel) const;
   Q_INVOKABLE int previousLineOfLevel(int row, int logLevel) const;
+  Q_INVOKABLE bool toggleMarkAt(int row, int preferredColor = static_cast<int>(LineMark_Default));
   Q_INVOKABLE void setFollowing(bool enabled);
   Q_INVOKABLE void toggleFollowing();
   Q_INVOKABLE void setRequestedScannerName(const QString& name);
@@ -127,8 +136,11 @@ signals:
   void scannerNameChanged();
   void linesPerSecondChanged();
   void fileSizeChanged();
+  void lineCountChanged();
 
  private:
+  [[nodiscard]] LineMarkColor normalizedMarkColor(int color) const noexcept;
+  bool setMarkColorAt(int row, LineMarkColor color);
   void markActiveForRecentLines();
   void setActive(bool active);
   void refreshSourceMetrics();

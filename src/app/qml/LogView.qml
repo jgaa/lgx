@@ -1,26 +1,26 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "components"
 
 Item {
     id: root
+    focus: true
 
     property url sourceUrl
+    property var workspace: null
+    property int nodeId: -1
+    property bool primaryView: true
     property var logModel: null
     property url claimedSourceUrl: ""
-    property int currentLine: listView.count > 0 ? topVisibleIndex + 1 : 0
-    property int lineCount: listView.count
+    readonly property int currentLine: lineList.currentLine
+    readonly property int lineCount: lineList.lineCount
     readonly property string formatText: logModel ? logModel.scannerName : "Auto"
     readonly property string requestedFormatName: logModel ? logModel.requestedScannerName : "Auto"
     readonly property real linesPerSecond: logModel ? logModel.linesPerSecond : 0
     readonly property real fileSize: logModel ? logModel.fileSize : 0
-    readonly property bool hasSelection: selectedIndexes.length > 0
-    readonly property string selectedText: selectedIndexes
-        .map(function(index) {
-            const row = selectedRowsByIndex[index]
-            return row ? row.text : ""
-        })
-        .join("\n")
+    readonly property bool hasSelection: lineList.hasSelection
+    readonly property string selectedText: lineList.selectedText
     readonly property string displaySourceText: {
         if (!sourceUrl) {
             return ""
@@ -28,152 +28,8 @@ Item {
 
         return sourceUrl.toString().startsWith("file://") ? sourceUrl.toLocalFile() : sourceUrl.toString()
     }
-    property int topVisibleIndex: 0
-    property var selectedIndexes: []
-    property var selectedRowsByIndex: ({})
-    property int selectionAnchorIndex: -1
-    property int dragStartIndex: -1
-    property var dragBaseSelection: []
-    property int contextMenuLineIndex: -1
-    property string contextMenuLineText: ""
-    property real maxRowWidth: 0
-    property bool wrapLogLines: false
-    readonly property bool pointerSelectionActive: dragStartIndex >= 0
     readonly property bool following: !!logModel && logModel.following
-
-    function normalizeIndex(index) {
-        return Math.max(0, Math.min(index, listView.count - 1))
-    }
-
-    function rowText(message, rawMessage) {
-        return message.length > 0 ? message : rawMessage
-    }
-
-    function levelForegroundColor(logLevel) {
-        UiSettings.logLevelStylesRevision
-        return UiSettings.logLevelForegroundColor(logLevel)
-    }
-
-    function levelBackgroundColor(logLevel) {
-        UiSettings.logLevelStylesRevision
-        return UiSettings.logLevelBackgroundColor(logLevel)
-    }
-
-    function lineShadeOpacity(index) {
-        return index % 2 === 0 ? 0.0 : 0.025
-    }
-
-    function isIndexSelected(index) {
-        return selectedRowsByIndex[index] !== undefined
-    }
-
-    function setSelectedRows(entries) {
-        const map = {}
-        const indexes = []
-        const sortedEntries = entries
-            .filter(function(entry) { return entry && entry.index >= 0 && entry.index < listView.count })
-            .sort(function(left, right) { return left.index - right.index })
-
-        for (let i = 0; i < sortedEntries.length; ++i) {
-            const entry = sortedEntries[i]
-            if (map[entry.index] !== undefined) {
-                continue
-            }
-
-            map[entry.index] = entry
-            indexes.push(entry.index)
-        }
-
-        selectedRowsByIndex = map
-        selectedIndexes = indexes
-    }
-
-    function clearSelection() {
-        setSelectedRows([])
-    }
-
-    function selectionEntry(index, message, rawMessage) {
-        return {
-            index: index,
-            text: rowText(message, rawMessage)
-        }
-    }
-
-    function addSingleSelection(index, message, rawMessage) {
-        const entries = selectedIndexes.map(function(selectedIndex) {
-            return selectedRowsByIndex[selectedIndex]
-        })
-        entries.push(selectionEntry(index, message, rawMessage))
-        setSelectedRows(entries)
-    }
-
-    function replaceSelectionWithRange(startIndex, endIndex, baseEntries, rowProvider) {
-        const first = Math.min(startIndex, endIndex)
-        const last = Math.max(startIndex, endIndex)
-        const entries = baseEntries ? baseEntries.slice() : []
-
-        for (let index = first; index <= last; ++index) {
-            entries.push(rowProvider(index))
-        }
-
-        setSelectedRows(entries)
-    }
-
-    function handlePressed(index, message, rawMessage, modifiers) {
-        if (listView.count <= 0) {
-            return
-        }
-
-        const normalizedIndex = normalizeIndex(index)
-        dragStartIndex = normalizedIndex
-        selectionAnchorIndex = normalizedIndex
-        if ((modifiers & Qt.ShiftModifier) !== 0) {
-            dragBaseSelection = selectedIndexes.map(function(selectedIndex) {
-                return selectedRowsByIndex[selectedIndex]
-            })
-            addSingleSelection(normalizedIndex, message, rawMessage)
-            return
-        }
-
-        dragBaseSelection = []
-        setSelectedRows([selectionEntry(normalizedIndex, message, rawMessage)])
-    }
-
-    function handleDragSelection(index, rowProvider) {
-        if (dragStartIndex < 0 || listView.count <= 0) {
-            return
-        }
-
-        replaceSelectionWithRange(dragStartIndex, normalizeIndex(index), dragBaseSelection, rowProvider)
-    }
-
-    function finishPointerSelection() {
-        dragStartIndex = -1
-        dragBaseSelection = []
-    }
-
-    function copySelectionToClipboard() {
-        if (!hasSelection) {
-            return
-        }
-
-        AppEngine.copyTextToClipboard(selectedText)
-    }
-
-    function copyLineToClipboard(rowIndex) {
-        if (rowIndex < 0 || rowIndex >= listView.count) {
-            return
-        }
-
-        const plainText = logModel ? logModel.plainTextAt(rowIndex) : ""
-        AppEngine.copyTextToClipboard(plainText)
-    }
-
-    function openContextMenu(rowIndex, rowTextValue, globalPoint) {
-        contextMenuLineIndex = rowIndex
-        contextMenuLineText = rowTextValue
-        lineContextMenu.popup(globalPoint.x, globalPoint.y)
-    }
+    property bool wrapLogLines: false
 
     function releaseLogModel() {
         if (!claimedSourceUrl || claimedSourceUrl.toString().length === 0) {
@@ -183,7 +39,6 @@ Item {
         AppEngine.releaseLogModel(claimedSourceUrl)
         claimedSourceUrl = ""
         logModel = null
-        maxRowWidth = 0
     }
 
     function acquireLogModel() {
@@ -207,58 +62,31 @@ Item {
 
         claimedSourceUrl = sourceUrl
         logModel = createdModel
-        maxRowWidth = 0
-        clearSelection()
-        finishPointerSelection()
+        lineList.clearSelection()
+        lineList.finishPointerSelection()
         if (createdModel.following) {
             ensureFollowingAtEnd()
         }
     }
 
-    function updateTopVisibleIndex() {
-        if (listView.count <= 0) {
-            topVisibleIndex = 0
-            return
-        }
-
-        const visibleIndex = listView.indexAt(0, listView.contentY + 1)
-        topVisibleIndex = visibleIndex >= 0 ? visibleIndex : 0
-    }
-
-    function scrollToFirst() {
-        if (listView.count <= 0) {
-            return
-        }
-
-        listView.positionViewAtBeginning()
-    }
-
-    function scrollToLast() {
-        if (listView.count <= 0) {
-            return
-        }
-
-        listView.positionViewAtEnd()
-    }
-
     function ensureFollowingAtEnd() {
-        if (!root.following || listView.count <= 0) {
+        if (!root.following || lineList.lineCount <= 0) {
             return
         }
 
         Qt.callLater(function() {
-            if (!root.following || listView.count <= 0) {
+            if (!root.following || lineList.lineCount <= 0) {
                 return
             }
 
-            root.scrollToLast()
+            lineList.scrollToLast()
 
             Qt.callLater(function() {
-                if (!root.following || listView.count <= 0) {
+                if (!root.following || lineList.lineCount <= 0) {
                     return
                 }
 
-                root.scrollToLast()
+                lineList.scrollToLast()
             })
         })
     }
@@ -270,7 +98,7 @@ Item {
 
         logModel.setFollowing(enabled)
         if (enabled) {
-            root.ensureFollowingAtEnd()
+            ensureFollowingAtEnd()
         }
     }
 
@@ -281,26 +109,24 @@ Item {
 
         logModel.toggleFollowing()
         if (logModel.following) {
-            root.ensureFollowingAtEnd()
+            ensureFollowingAtEnd()
         }
     }
 
-    function jumpByPercent(deltaPercent) {
-        const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
-        if (maximumContentY <= 0) {
-            return
-        }
+    function scrollToFirst() {
+        lineList.scrollToFirst()
+    }
 
-        const nextContentY = Math.max(0, Math.min(maximumContentY, listView.contentY + maximumContentY * deltaPercent / 100.0))
-        listView.contentY = nextContentY
+    function scrollToLast() {
+        lineList.scrollToLast()
     }
 
     function scrollUpTenPercent() {
-        jumpByPercent(-10)
+        lineList.jumpByPercent(-10)
     }
 
     function scrollDownTenPercent() {
-        jumpByPercent(10)
+        lineList.jumpByPercent(10)
     }
 
     function setWrapLogLines(enabled) {
@@ -308,7 +134,7 @@ Item {
     }
 
     function toggleWrapLogLines() {
-        root.setWrapLogLines(!root.wrapLogLines)
+        setWrapLogLines(!wrapLogLines)
     }
 
     function setRequestedFormatName(name) {
@@ -320,30 +146,46 @@ Item {
     }
 
     function selectSingleRow(index) {
-        if (!logModel || index < 0 || index >= listView.count) {
-            return
+        return lineList.selectSingleRow(index, ListView.Visible)
+    }
+
+    function revealSourceRow(sourceRow, shouldScroll) {
+        return lineList.revealSourceRow(sourceRow, shouldScroll, ListView.Visible)
+    }
+
+    function goToLine(lineNumber) {
+        if (!logModel || lineList.lineCount <= 0) {
+            return false
         }
 
-        const plainText = logModel.plainTextAt(index)
-        selectionAnchorIndex = index
-        setSelectedRows([selectionEntry(index, plainText, "")])
-        listView.positionViewAtIndex(index, ListView.Visible)
+        const parsedLine = Number(lineNumber)
+        if (!Number.isFinite(parsedLine)) {
+            return false
+        }
+
+        const targetIndex = Math.max(0, Math.min(lineList.lineCount - 1, Math.trunc(parsedLine) - 1))
+        if (!!logModel && logModel.following) {
+            setFollowing(false)
+        }
+
+        return lineList.selectSingleRow(targetIndex, ListView.Beginning)
     }
 
     function navigateToLevel(level, forward) {
-        if (!logModel || listView.count <= 0) {
+        if (!logModel || lineList.lineCount <= 0) {
             return
         }
 
+        const selectedIndexes = lineList.selectedIndexes
         const anchor = selectedIndexes.length > 0
             ? (forward ? selectedIndexes[selectedIndexes.length - 1] : selectedIndexes[0])
-            : topVisibleIndex
-        const start = Math.max(0, Math.min(listView.count - 1, anchor))
+            : lineList.topVisibleIndex
+        const start = Math.max(0, Math.min(lineList.lineCount - 1, anchor))
         const targetIndex = forward
             ? logModel.nextLineOfLevel(start, level)
             : logModel.previousLineOfLevel(start, level)
         if (targetIndex >= 0) {
-            selectSingleRow(targetIndex)
+            lineList.selectSingleRow(targetIndex, ListView.Visible)
         }
     }
 
@@ -363,16 +205,41 @@ Item {
         navigateToLevel(1, true)
     }
 
-    onWrapLogLinesChanged: {
-        maxRowWidth = 0
-        if (wrapLogLines) {
-            Qt.callLater(function() { root.updateTopVisibleIndex() })
+    function activateView() {
+        forceActiveFocus()
+        if (workspace) {
+            workspace.setActiveView(root, nodeId)
         }
     }
+
+    function registerWithWorkspace() {
+        if (!workspace) {
+            return
+        }
+
+        workspace.registerPrimaryLogView(root)
+        workspace.setActiveView(root, nodeId)
+    }
+
+    function openViewMenu() {
+        activateView()
+        const point = viewMenuButton.mapToItem(null, 0, viewMenuButton.height)
+        viewMenu.popup(point.x, point.y)
+    }
+
     onSourceUrlChanged: acquireLogModel()
+    onWorkspaceChanged: registerWithWorkspace()
     onFollowingChanged: ensureFollowingAtEnd()
-    Component.onCompleted: acquireLogModel()
-    Component.onDestruction: releaseLogModel()
+    Component.onCompleted: {
+        acquireLogModel()
+        registerWithWorkspace()
+    }
+    Component.onDestruction: {
+        if (workspace && workspace.primaryLogView === root) {
+            workspace.primaryLogView = null
+        }
+        releaseLogModel()
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -393,200 +260,59 @@ Item {
         }
     }
 
-    Menu {
-        id: lineContextMenu
-
-        Menu {
-            title: qsTr("Copy")
-
-            Menu {
-                title: qsTr("Selection Copy")
-                enabled: root.hasSelection
-
-                MenuItem {
-                    text: qsTr("Copy")
-                    enabled: root.hasSelection
-                    onTriggered: root.copySelectionToClipboard()
-                }
-            }
-
-            Menu {
-                title: qsTr("Line")
-                enabled: root.contextMenuLineIndex >= 0
-
-                MenuItem {
-                    text: qsTr("Copy")
-                    enabled: root.contextMenuLineIndex >= 0
-                    onTriggered: root.copyLineToClipboard(root.contextMenuLineIndex)
-                }
-            }
-        }
-    }
-
-    ColumnLayout {
+    LogLineList {
+        id: lineList
         anchors.fill: parent
         anchors.margins: 20
-        spacing: 12
+        rowModel: root.logModel
+        wrapLogLines: root.wrapLogLines
+        followMode: root.following
+        emptyText: qsTr("Log is open, but no rows are loaded yet.")
+        onActivated: root.activateView()
+    }
 
-        Frame {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+    SymbolToolButton {
+        id: viewMenuButton
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 10
+        z: 2
+        visible: viewMenuButton.hovered || viewMenuButton.down || viewHoverArea.containsMouse
+        symbol: "menu"
+        symbolPixelSize: 18
+        implicitWidth: 28
+        implicitHeight: 28
+        bgColor: "#efe7db"
+        onClicked: root.openViewMenu()
+    }
 
-            ListView {
-                id: listView
-                anchors.fill: parent
-                clip: true
-                model: root.logModel
-                boundsBehavior: Flickable.StopAtBounds
-                interactive: !root.pointerSelectionActive
-                rightMargin: verticalScrollBar.width
-                bottomMargin: horizontalScrollBar.height
-                contentWidth: root.wrapLogLines ? width : Math.max(width, root.maxRowWidth)
-                onContentYChanged: root.updateTopVisibleIndex()
-                onCountChanged: {
-                    root.updateTopVisibleIndex()
-                    if (count === 0) {
-                        root.clearSelection()
-                        root.finishPointerSelection()
-                        root.maxRowWidth = 0
-                    }
-                    root.ensureFollowingAtEnd()
-                }
-                onHeightChanged: {
-                    root.updateTopVisibleIndex()
-                    root.ensureFollowingAtEnd()
-                }
-                onModelChanged: {
-                    root.clearSelection()
-                    root.maxRowWidth = 0
-                    root.ensureFollowingAtEnd()
-                }
-                onWidthChanged: {
-                    if (root.wrapLogLines) {
-                        root.maxRowWidth = 0
-                    }
-                }
+    MouseArea {
+        id: viewHoverArea
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        hoverEnabled: true
+        z: 1
+    }
 
-                ScrollBar.vertical: ScrollBar {
-                    id: verticalScrollBar
-                    policy: ScrollBar.AlwaysOn
-                }
+    Menu {
+        id: viewMenu
 
-                ScrollBar.horizontal: ScrollBar {
-                    id: horizontalScrollBar
-                    policy: ScrollBar.AlwaysOn
-                }
-
-                delegate: Rectangle {
-                    required property int index
-                    required property string message
-                    required property string rawMessage
-                    required property int lineNo
-                    required property int logLevel
-
-                    width: ListView.view
-                        ? (root.wrapLogLines
-                            ? ListView.view.width - ListView.view.rightMargin
-                            : Math.max(ListView.view.width - ListView.view.rightMargin, rowContent.implicitWidth + 12))
-                        : rowContent.implicitWidth + 12
-                    height: rowContent.implicitHeight + 12
-                    color: root.isIndexSelected(index) ? "#d7e6f5" : root.levelBackgroundColor(logLevel)
-
-                    Component.onCompleted: {
-                        if (width > root.maxRowWidth) {
-                            root.maxRowWidth = width
-                        }
-                    }
-
-                    onWidthChanged: {
-                        if (width > root.maxRowWidth) {
-                            root.maxRowWidth = width
-                        }
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        color: "#000000"
-                        opacity: root.isIndexSelected(index) ? 0.0 : root.lineShadeOpacity(index)
-                    }
-
-                    Row {
-                        id: rowContent
-                        anchors.fill: parent
-                        anchors.margins: 6
-                        spacing: 12
-
-                        Label {
-                            text: lineNo > 0 ? lineNo : index + 1
-                            color: Qt.darker(root.levelForegroundColor(logLevel), 1.1)
-                            font.family: UiSettings.logFontFamily
-                            font.pixelSize: UiSettings.effectiveLogFontPixelSize
-                        }
-
-                        Label {
-                            id: messageLabel
-                            text: message.length > 0 ? message : rawMessage
-                            width: root.wrapLogLines ? Math.max(0, parent.width - x) : implicitWidth
-                            wrapMode: root.wrapLogLines ? Text.WrapAtWordBoundaryOrAnywhere : Text.NoWrap
-                            font.family: UiSettings.logFontFamily
-                            font.pixelSize: UiSettings.effectiveLogFontPixelSize
-                            color: root.levelForegroundColor(logLevel)
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        hoverEnabled: true
-                        preventStealing: true
-
-                        function rowProvider(rowIndex) {
-                            const plainText = root.logModel ? root.logModel.plainTextAt(rowIndex) : ""
-                            return root.selectionEntry(rowIndex, plainText, "")
-                        }
-
-                        onPressed: function(mouse) {
-                            if (mouse.button === Qt.RightButton) {
-                                if (!root.isIndexSelected(index)) {
-                                    root.setSelectedRows([root.selectionEntry(index, message, rawMessage)])
-                                }
-                                root.openContextMenu(index, root.rowText(message, rawMessage), mapToGlobal(mouse.x, mouse.y))
-                                return
-                            }
-
-                            root.handlePressed(index, message, rawMessage, mouse.modifiers)
-                        }
-
-                        onPositionChanged: function(mouse) {
-                            if (!(mouse.buttons & Qt.LeftButton)) {
-                                return
-                            }
-
-                            const pointInView = mapToItem(listView.contentItem, mouse.x, mouse.y)
-                            const hoveredIndex = listView.indexAt(0, pointInView.y)
-                            if (hoveredIndex >= 0) {
-                                root.handleDragSelection(hoveredIndex, rowProvider)
-                            }
-                        }
-
-                        onReleased: root.finishPointerSelection()
-                        onCanceled: root.finishPointerSelection()
-                    }
+        MenuItem {
+            text: qsTr("New Filter View Horizontal Split")
+            onTriggered: {
+                if (root.workspace) {
+                    root.workspace.openNewFilterView(Qt.Vertical)
                 }
             }
         }
-    }
 
-    Label {
-        anchors.centerIn: parent
-        visible: !!root.logModel && root.logModel.rowCount() === 0
-        text: qsTr("Log is open, but no rows are loaded yet.")
-        color: "#6c655c"
-    }
-
-    Shortcut {
-        sequence: StandardKey.Copy
-        enabled: root.hasSelection
-        onActivated: root.copySelectionToClipboard()
+        MenuItem {
+            text: qsTr("New Filter View Vertical Split")
+            onTriggered: {
+                if (root.workspace) {
+                    root.workspace.openNewFilterView(Qt.Horizontal)
+                }
+            }
+        }
     }
 }

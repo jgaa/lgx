@@ -12,6 +12,10 @@
 #include "RecentLogsModel.h"
 
 namespace lgx {
+class FilterModel;
+}
+
+namespace lgx {
 
 /**
  * @brief Application engine and service registry.
@@ -28,6 +32,9 @@ class AppEngine : public QObject {
   Q_PROPERTY(QAbstractItemModel* recentLogs READ recentLogs CONSTANT)
   Q_PROPERTY(int recentLogCount READ recentLogCount NOTIFY recentLogsChanged)
   Q_PROPERTY(QStringList logScanners READ logScanners CONSTANT)
+  Q_PROPERTY(int currentOpenLogIndex READ currentOpenLogIndex WRITE setCurrentOpenLogIndex NOTIFY currentOpenLogIndexChanged)
+  Q_PROPERTY(QUrl currentOpenLogSourceUrl READ currentOpenLogSourceUrl NOTIFY currentOpenLogSourceUrlChanged)
+  Q_PROPERTY(QObject* currentLogModel READ currentLogModel NOTIFY currentLogModelChanged)
 
  public:
   explicit AppEngine(QObject* parent = nullptr);
@@ -44,6 +51,10 @@ class AppEngine : public QObject {
   [[nodiscard]] QAbstractItemModel* recentLogs() noexcept;
   [[nodiscard]] int recentLogCount() const noexcept;
   [[nodiscard]] QStringList logScanners() const;
+  [[nodiscard]] int currentOpenLogIndex() const noexcept;
+  [[nodiscard]] QUrl currentOpenLogSourceUrl() const;
+  [[nodiscard]] QObject* currentLogModel() const noexcept;
+  Q_INVOKABLE void setCurrentOpenLogIndex(int index);
 
   /**
    * @brief Open one log source in the UI tab model.
@@ -59,9 +70,11 @@ class AppEngine : public QObject {
   /**
    * @brief Prompt the user to choose a local file and open it as a log source.
    *
+   * @param initial_url Optional active source used to seed the initial directory
+   * for the file picker when it points to a local file.
    * @return Open tab index, or -1 when cancelled or invalid.
    */
-  Q_INVOKABLE int openLogFile();
+  Q_INVOKABLE int openLogFile(const QUrl& initial_url = {});
   Q_INVOKABLE int openRecentLogSourceAt(int index);
   Q_INVOKABLE bool closeOpenLogAt(int index);
 
@@ -85,6 +98,7 @@ class AppEngine : public QObject {
    * @return Shared LogModel instance as QObject, or nullptr for an invalid URL.
    */
   Q_INVOKABLE QObject* createLogModel(const QUrl& url);
+  Q_INVOKABLE QObject* createFilterModel(const QUrl& url);
 
   /**
    * @brief Release one QML-side claim on a previously acquired model.
@@ -95,6 +109,7 @@ class AppEngine : public QObject {
    * @param url Log source URL.
    */
   Q_INVOKABLE void releaseLogModel(const QUrl& url);
+  Q_INVOKABLE void releaseFilterModel(QObject* model);
 
   /**
    * @brief Resolve the currently registered model for a URL.
@@ -117,6 +132,9 @@ class AppEngine : public QObject {
  signals:
   void openLogCountChanged();
   void recentLogsChanged();
+  void currentOpenLogIndexChanged();
+  void currentOpenLogSourceUrlChanged();
+  void currentLogModelChanged();
 
  private:
   [[nodiscard]] static QString titleForUrl(const QUrl& url);
@@ -124,6 +142,7 @@ class AppEngine : public QObject {
   int openLogSourceInternal(const QUrl& url, bool add_to_recent);
   void addRecentLogSource(const QUrl& url);
   void loadRecentLogSources();
+  void updateCurrentLogModel();
 
   struct ModelEntry {
     QPointer<LogModel> model;
@@ -135,6 +154,9 @@ class AppEngine : public QObject {
   OpenLogsModel open_logs_{this};
   RecentLogsModel recent_logs_{this};
   QHash<QUrl, ModelEntry> models_;
+  int current_open_log_index_{-1};
+  QUrl current_open_log_source_url_;
+  QPointer<LogModel> current_log_model_;
 };
 
 }  // namespace lgx

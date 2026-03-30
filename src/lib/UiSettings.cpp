@@ -22,6 +22,12 @@ constexpr int kMinLogZoomPercent = 50;
 constexpr int kMaxLogZoomPercent = 400;
 constexpr int kLogZoomStepPercent = 10;
 
+struct LineMarkStyleDefinition {
+  LineMarkColor color;
+  const char* key;
+  const char* fallback;
+};
+
 struct LogLevelStyleDefinition {
   LogLevel level;
   const char* key;
@@ -39,6 +45,16 @@ constexpr std::array kLogLevelStyleDefinitions{
     LogLevelStyleDefinition{LogLevel_Trace, "trace", "Trace", "#6b7280", "#ffffff"},
 };
 
+constexpr std::array kLineMarkStyleDefinitions{
+    LineMarkStyleDefinition{LineMark_Default, "default", "#2e7d32"},
+    LineMarkStyleDefinition{LineMark_Accent1, "accent1", "#c62828"},
+    LineMarkStyleDefinition{LineMark_Accent2, "accent2", "#ef6c00"},
+    LineMarkStyleDefinition{LineMark_Accent3, "accent3", "#f9a825"},
+    LineMarkStyleDefinition{LineMark_Accent4, "accent4", "#1565c0"},
+    LineMarkStyleDefinition{LineMark_Accent5, "accent5", "#00838f"},
+    LineMarkStyleDefinition{LineMark_Accent6, "accent6", "#111111"},
+};
+
 const LogLevelStyleDefinition& definitionForLevel(int level) {
   const auto clamped = static_cast<LogLevel>(
       std::clamp(level, static_cast<int>(LogLevel_Error), static_cast<int>(LogLevel_Trace)));
@@ -48,6 +64,10 @@ const LogLevelStyleDefinition& definitionForLevel(int level) {
 QString colorKey(const char* level_key, const char* channel) {
   return QStringLiteral("ui/log/colors/%1/%2")
       .arg(QString::fromUtf8(level_key), QString::fromUtf8(channel));
+}
+
+QString markColorKey(const char* slot_key) {
+  return QStringLiteral("ui/log/marks/%1").arg(QString::fromUtf8(slot_key));
 }
 
 }  // namespace
@@ -78,6 +98,13 @@ UiSettings::UiSettings(QObject* parent)
     log_level_background_colors_[level_index] = normalizedColor(
         settings.value(colorKey(definition.key, "background"), QString::fromUtf8(definition.background)).toString(),
         QString::fromUtf8(definition.background));
+  }
+
+  for (const auto& definition : kLineMarkStyleDefinitions) {
+    const auto color_index = static_cast<size_t>(definition.color - 1);
+    line_mark_colors_[color_index] = normalizedColor(
+        settings.value(markColorKey(definition.key), QString::fromUtf8(definition.fallback)).toString(),
+        QString::fromUtf8(definition.fallback));
   }
 }
 
@@ -130,6 +157,10 @@ QVariantList UiSettings::logLevelStyles() const {
 
 int UiSettings::logLevelStylesRevision() const noexcept {
   return log_level_styles_revision_;
+}
+
+int UiSettings::lineMarkColorsRevision() const noexcept {
+  return line_mark_colors_revision_;
 }
 
 int UiSettings::minLogBaseFontPixelSize() const noexcept {
@@ -202,12 +233,20 @@ QString UiSettings::logLevelBackgroundColor(int level) const {
   return colorForLevel(log_level_background_colors_, level);
 }
 
+QString UiSettings::lineMarkColor(int color) const {
+  return colorForMark(line_mark_colors_, color);
+}
+
 void UiSettings::setLogLevelForegroundColor(int level, const QString& color) {
   setLogLevelColor(log_level_foreground_colors_, QStringLiteral("foreground"), level, color);
 }
 
 void UiSettings::setLogLevelBackgroundColor(int level, const QString& color) {
   setLogLevelColor(log_level_background_colors_, QStringLiteral("background"), level, color);
+}
+
+void UiSettings::setLineMarkColor(int color, const QString& value) {
+  setLineMarkSlotColor(color, value);
 }
 
 void UiSettings::stepLogZoom(int steps) {
@@ -245,8 +284,18 @@ size_t UiSettings::colorIndexForLevel(int level) const noexcept {
       std::clamp(level, static_cast<int>(LogLevel_Error), static_cast<int>(LogLevel_Trace)));
 }
 
+size_t UiSettings::colorIndexForMark(int color) const noexcept {
+  const auto clamped = std::clamp(color, static_cast<int>(LineMark_Default),
+                                  static_cast<int>(LineMark_Accent6));
+  return static_cast<size_t>(clamped - 1);
+}
+
 QString UiSettings::colorForLevel(const std::array<QString, number_of_log_levels>& colors, int level) const {
   return colors.at(colorIndexForLevel(level));
+}
+
+QString UiSettings::colorForMark(const std::array<QString, number_of_line_mark_slots>& colors, int color) const {
+  return colors.at(colorIndexForMark(color));
 }
 
 QString UiSettings::normalizedColor(const QString& color, const QString& fallback) const {
@@ -275,6 +324,20 @@ void UiSettings::setLogLevelColor(std::array<QString, number_of_log_levels>& col
   saveValue(colorKey(definition.key, foreground ? "foreground" : "background"), normalized);
   ++log_level_styles_revision_;
   emit logLevelStylesChanged();
+}
+
+void UiSettings::setLineMarkSlotColor(int color, const QString& value) {
+  const auto definition_index = colorIndexForMark(color);
+  const auto& definition = kLineMarkStyleDefinitions.at(definition_index);
+  const auto normalized = normalizedColor(value, QString::fromUtf8(definition.fallback));
+  if (line_mark_colors_[definition_index] == normalized) {
+    return;
+  }
+
+  line_mark_colors_[definition_index] = normalized;
+  saveValue(markColorKey(definition.key), normalized);
+  ++line_mark_colors_revision_;
+  emit lineMarkColorsChanged();
 }
 
 }  // namespace lgx

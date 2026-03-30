@@ -1,0 +1,106 @@
+#pragma once
+
+#include <array>
+
+#include <QAbstractListModel>
+#include <QPointer>
+#include <QRegularExpression>
+#include <QTimer>
+#include <QUrl>
+
+#include "LogModel.h"
+
+namespace lgx {
+
+class FilterModel final : public QAbstractListModel {
+  Q_OBJECT
+  Q_PROPERTY(QObject* sourceModel READ sourceModelObject CONSTANT)
+  Q_PROPERTY(QUrl sourceUrl READ sourceUrl CONSTANT)
+  Q_PROPERTY(QString pattern READ pattern WRITE setPattern NOTIFY patternChanged)
+  Q_PROPERTY(bool regex READ regex WRITE setRegex NOTIFY regexChanged)
+  Q_PROPERTY(bool caseInsensitive READ caseInsensitive WRITE setCaseInsensitive NOTIFY caseInsensitiveChanged)
+  Q_PROPERTY(bool autoRefresh READ autoRefresh WRITE setAutoRefresh NOTIFY autoRefreshChanged)
+  Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
+  Q_PROPERTY(QString regexError READ regexError NOTIFY regexErrorChanged)
+
+ public:
+  enum Role {
+    SourceRowRole = Qt::UserRole + 1,
+    LineNoRole,
+    FunctionNameRole,
+    LogLevelRole,
+    MarkedRole,
+    MarkColorRole,
+    RawMessageRole,
+    MessageRole,
+    DateRole,
+    TagsRole,
+    ThreadIdRole
+  };
+  Q_ENUM(Role)
+
+  explicit FilterModel(LogModel* source_model, QObject* parent = nullptr);
+
+  [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
+  [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+  [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
+
+  [[nodiscard]] QObject* sourceModelObject() const noexcept;
+  [[nodiscard]] QUrl sourceUrl() const;
+  [[nodiscard]] QString pattern() const;
+  [[nodiscard]] bool regex() const noexcept;
+  [[nodiscard]] bool caseInsensitive() const noexcept;
+  [[nodiscard]] bool autoRefresh() const noexcept;
+  [[nodiscard]] bool dirty() const noexcept;
+  [[nodiscard]] QString regexError() const;
+
+  Q_INVOKABLE QString plainTextAt(int row) const;
+  Q_INVOKABLE int sourceRowAt(int row) const;
+  Q_INVOKABLE int lineNoAt(int row) const;
+  Q_INVOKABLE int logLevelAt(int row) const;
+  Q_INVOKABLE bool markedAt(int row) const;
+  Q_INVOKABLE int markColorAt(int row) const;
+  Q_INVOKABLE bool toggleMarkAt(int row, int preferredColor = static_cast<int>(LineMark_Default));
+  Q_INVOKABLE bool levelEnabled(int level) const noexcept;
+  Q_INVOKABLE void setLevelEnabled(int level, bool enabled);
+  Q_INVOKABLE void refresh();
+
+ public slots:
+  void setPattern(const QString& pattern);
+  void setRegex(bool enabled);
+  void setCaseInsensitive(bool enabled);
+  void setAutoRefresh(bool enabled);
+
+ signals:
+  void patternChanged();
+  void regexChanged();
+  void caseInsensitiveChanged();
+  void autoRefreshChanged();
+  void dirtyChanged();
+  void regexErrorChanged();
+  void levelsChanged();
+
+ private:
+  [[nodiscard]] bool matchesSourceRow(int source_row) const;
+  [[nodiscard]] int proxyRowForSourceRow(int source_row) const;
+  void scheduleRefresh();
+  void markDirty();
+  void rebuildFilter();
+  void updateRegex();
+  void onSourceRowsChanged();
+  void onSourceDataChanged(int first_row, int last_row, const QList<int>& roles);
+
+  QPointer<LogModel> source_model_;
+  QVector<int> filtered_rows_;
+  QString pattern_;
+  QRegularExpression compiled_regex_;
+  QString regex_error_;
+  std::array<bool, number_of_log_levels> enabled_levels_{};
+  QTimer refresh_timer_;
+  bool regex_{false};
+  bool case_insensitive_{false};
+  bool auto_refresh_{true};
+  bool dirty_{false};
+};
+
+}  // namespace lgx

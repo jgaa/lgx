@@ -9,6 +9,10 @@ qt_add_qml_module(lgx_app
     Main.qml
     qml/AboutDialog.qml
     qml/ColorSettings.qml
+    qml/FilterView.qml
+    qml/LogLineList.qml
+    qml/LogWorkspace.qml
+    qml/components/LineMarkButton.qml
     qml/components/SymbolToolButton.qml
     qml/DialogHelper.js
     qml/GeneralSettings.qml

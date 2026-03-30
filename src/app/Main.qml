@@ -12,18 +12,28 @@ ApplicationWindow {
     title: Qt.application.name
     color: "#f4f1ea"
 
-    readonly property var activeLogView: currentLogViewLoader.item
-    readonly property url activeSourceUrl: activeLogView ? activeLogView.sourceUrl : AppEngine.openLogSourceUrlAt(tabBar.currentIndex)
+    readonly property var activeWorkspace: {
+        if (tabBar.currentIndex < 0) {
+            return null
+        }
+
+        const wrapper = workspaceRepeater.itemAt(tabBar.currentIndex)
+        return wrapper ? wrapper.workspace : null
+    }
+    readonly property var activeCurrentLogModel: AppEngine.currentLogModel
+    readonly property var activeLogView: activeWorkspace ? activeWorkspace.primaryLogView : null
+    readonly property var activeView: activeWorkspace ? activeWorkspace.activeView : activeLogView
+    readonly property url activeSourceUrl: AppEngine.currentOpenLogSourceUrl
     readonly property string activeSourceText: activeSourceUrl ? AppEngine.displaySourceTextForUrl(activeSourceUrl) : ""
-    readonly property int activeLineCount: activeLogView ? activeLogView.lineCount : 0
+    readonly property int activeLineCount: activeCurrentLogModel ? activeCurrentLogModel.lineCount : 0
     readonly property int activeCurrentLine: activeLogView ? activeLogView.currentLine : 0
-    readonly property real activeLinesPerSecond: activeLogView ? activeLogView.linesPerSecond : 0
-    readonly property real activeFileSize: activeLogView ? activeLogView.fileSize : 0
-    readonly property string activeFormatText: activeLogView ? activeLogView.formatText : "Auto"
-    readonly property string activeRequestedFormatName: activeLogView ? activeLogView.requestedFormatName : "Auto"
-    readonly property bool activeHasSelection: activeLogView ? activeLogView.hasSelection : false
-    readonly property string activeSelectedText: activeLogView ? activeLogView.selectedText : ""
-    readonly property bool activeFollowing: activeLogView ? activeLogView.following : false
+    readonly property real activeLinesPerSecond: activeCurrentLogModel ? activeCurrentLogModel.linesPerSecond : 0
+    readonly property real activeFileSize: activeCurrentLogModel ? activeCurrentLogModel.fileSize : 0
+    readonly property string activeFormatText: activeCurrentLogModel ? activeCurrentLogModel.scannerName : "Auto"
+    readonly property string activeRequestedFormatName: activeCurrentLogModel ? activeCurrentLogModel.requestedScannerName : "Auto"
+    readonly property bool activeHasSelection: activeView ? activeView.hasSelection : false
+    readonly property string activeSelectedText: activeView ? activeView.selectedText : ""
+    readonly property bool activeFollowing: !!activeCurrentLogModel && activeCurrentLogModel.following
     readonly property bool activeWrapLogLines: activeLogView ? activeLogView.wrapLogLines : false
     readonly property var zoomMenuValues: [50, 75, 90, 100, 110, 125, 150, 175, 200]
     readonly property var windowSizePresets: [
@@ -59,8 +69,8 @@ ApplicationWindow {
     }
 
     function toggleActiveFollow() {
-        if (activeLogView) {
-            activeLogView.toggleFollowing()
+        if (activeCurrentLogModel) {
+            activeCurrentLogModel.toggleFollowing()
         }
     }
 
@@ -71,9 +81,33 @@ ApplicationWindow {
     }
 
     function setActiveRequestedFormatName(name) {
-        if (activeLogView) {
-            activeLogView.setRequestedFormatName(name)
+        if (activeCurrentLogModel) {
+            activeCurrentLogModel.setRequestedScannerName(name)
         }
+    }
+
+    function openGoToLineDialog() {
+        if (!activeLogView || activeLineCount <= 0) {
+            return
+        }
+
+        goToLineField.text = activeCurrentLine > 0 ? String(activeCurrentLine) : ""
+        goToLineDialog.open()
+        goToLineField.forceActiveFocus()
+        goToLineField.selectAll()
+    }
+
+    function goToLineFromDialog() {
+        const lineNumber = Number(goToLineField.text.trim())
+        if (!activeLogView || !Number.isFinite(lineNumber) || lineNumber < 1) {
+            return
+        }
+
+        if (activeFollowing) {
+            activeLogView.setFollowing(false)
+        }
+        activeLogView.goToLine(lineNumber)
+        goToLineDialog.close()
     }
 
     function applyWindowSizePreset(preset) {
@@ -121,7 +155,7 @@ ApplicationWindow {
             MenuItem {
                 text: qsTr("Open")
                 onTriggered: {
-                    const index = AppEngine.openLogFile()
+                    const index = AppEngine.openLogFile(window.activeSourceUrl)
                     if (index >= 0) {
                         tabBar.currentIndex = index
                     }
@@ -217,7 +251,7 @@ ApplicationWindow {
 
             Menu {
                 title: qsTr("Follow")
-                enabled: !!window.activeLogView
+                enabled: !!window.activeCurrentLogModel
 
                 MenuItem {
                     text: qsTr("Enabled")
@@ -292,7 +326,7 @@ ApplicationWindow {
             Menu {
                 id: formatMenu
                 title: qsTr("Format")
-                enabled: !!window.activeLogView
+                enabled: !!window.activeCurrentLogModel
 
                 Instantiator {
                     model: AppEngine.logScanners
@@ -319,6 +353,14 @@ ApplicationWindow {
             MenuSeparator {}
 
             MenuItem {
+                text: qsTr("Goto Line")
+                enabled: !!window.activeLogView && window.activeLineCount > 0
+                onTriggered: window.openGoToLineDialog()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
                 text: window.visibility === Window.FullScreen ? qsTr("Exit Full Screen") : qsTr("Full Screen")
                 onTriggered: {
                     if (window.visibility === Window.FullScreen) {
@@ -332,6 +374,23 @@ ApplicationWindow {
 
         Menu {
             title: qsTr("&Windows")
+
+            Menu {
+                title: qsTr("New Filter View")
+                enabled: !!window.activeWorkspace
+
+                MenuItem {
+                    text: qsTr("Horizontal Split")
+                    onTriggered: window.activeWorkspace.openNewFilterView(Qt.Vertical)
+                }
+
+                MenuItem {
+                    text: qsTr("Vertical Split")
+                    onTriggered: window.activeWorkspace.openNewFilterView(Qt.Horizontal)
+                }
+            }
+
+            MenuSeparator {}
 
             MenuItem {
                 text: qsTr("Minimize")
@@ -364,7 +423,7 @@ ApplicationWindow {
             }
 
             LgxQml.SymbolToolButton {
-                enabled: !!window.activeLogView
+                enabled: !!window.activeCurrentLogModel
                 checkable: true
                 checked: window.activeFollowing
                 symbol: "move_down"
@@ -515,6 +574,7 @@ ApplicationWindow {
             id: tabBar
             Layout.fillWidth: true
             visible: !emptyBackground.visible
+            onCurrentIndexChanged: AppEngine.setCurrentOpenLogIndex(currentIndex)
 
             Repeater {
                 model: AppEngine.openLogs
@@ -572,28 +632,39 @@ ApplicationWindow {
             }
         }
 
-        Component {
-            id: logViewComponent
+        Component.onCompleted: AppEngine.setCurrentOpenLogIndex(tabBar.currentIndex)
 
-            LgxQml.LogView {
-                sourceUrl: AppEngine.openLogSourceUrlAt(tabBar.currentIndex)
-            }
-        }
-
-        Loader {
-            id: currentLogViewLoader
+        StackLayout {
+            id: workspaceStack
             visible: !emptyBackground.visible
             Layout.fillWidth: true
             Layout.fillHeight: true
-            active: AppEngine.openLogCount > 0 && tabBar.currentIndex >= 0
-            sourceComponent: logViewComponent
+            currentIndex: tabBar.currentIndex
+
+            Repeater {
+                id: workspaceRepeater
+                model: AppEngine.openLogs
+
+                delegate: Item {
+                    required property url sourceUrl
+                    property alias workspace: workspaceItem
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    LgxQml.LogWorkspace {
+                        id: workspaceItem
+                        anchors.fill: parent
+                        sourceUrl: parent.sourceUrl
+                    }
+                }
+            }
         }
 
         Item {
             id: emptyBackground
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: !currentLogViewLoader.active
+            visible: AppEngine.openLogCount === 0 || tabBar.currentIndex < 0
 
             ColumnLayout {
                 anchors.centerIn: parent
@@ -698,9 +769,56 @@ ApplicationWindow {
         id: preferencesDialog
     }
 
+    Dialog {
+        id: goToLineDialog
+        parent: Overlay.overlay
+        modal: true
+        title: qsTr("Goto Line")
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        width: 320
+
+        onOpened: {
+            goToLineField.forceActiveFocus()
+            goToLineField.selectAll()
+        }
+        onAccepted: window.goToLineFromDialog()
+
+        contentItem: ColumnLayout {
+            spacing: 10
+
+            Label {
+                text: qsTr("Line number")
+                color: "#6c655c"
+            }
+
+            TextField {
+                id: goToLineField
+                Layout.fillWidth: true
+                placeholderText: qsTr("1 - %1").arg(window.activeLineCount)
+                selectByMouse: true
+                validator: IntValidator {
+                    bottom: 1
+                    top: Math.max(1, window.activeLineCount)
+                }
+                onAccepted: {
+                    if (acceptableInput) {
+                        window.goToLineFromDialog()
+                    }
+                }
+            }
+        }
+    }
+
     Shortcut {
         sequence: "f"
-        enabled: !!window.activeLogView
+        enabled: !!window.activeCurrentLogModel
         onActivated: window.toggleActiveFollow()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+L"
+        enabled: !!window.activeLogView && window.activeLineCount > 0
+        onActivated: window.openGoToLineDialog()
     }
 }

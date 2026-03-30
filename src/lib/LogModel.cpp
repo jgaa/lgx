@@ -56,12 +56,18 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
 
   const auto& row = rows_[static_cast<size_t>(index.row())];
   switch (role) {
+    case SourceRowRole:
+      return index.row();
     case LineNoRole:
       return QVariant::fromValue(row.line_no);
     case FunctionNameRole:
       return row.function_name;
     case LogLevelRole:
       return QVariant::fromValue(static_cast<int>(row.log_level));
+    case MarkedRole:
+      return row.mark_color != LineMark_None;
+    case MarkColorRole:
+      return QVariant::fromValue(static_cast<int>(row.mark_color));
     case RawMessageRole:
       return row.raw_message;
     case MessageRole:
@@ -79,9 +85,12 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
 
 QHash<int, QByteArray> LogModel::roleNames() const {
   return {
+      {SourceRowRole, "sourceRow"},
       {LineNoRole, "lineNo"},
       {FunctionNameRole, "functionName"},
       {LogLevelRole, "logLevel"},
+      {MarkedRole, "marked"},
+      {MarkColorRole, "markColor"},
       {RawMessageRole, "rawMessage"},
       {MessageRole, "message"},
       {DateRole, "date"},
@@ -99,12 +108,44 @@ QString LogModel::plainTextAt(int row) const {
   return log_row.message.isEmpty() ? log_row.raw_message : log_row.message;
 }
 
+int LogModel::sourceRowAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return -1;
+  }
+
+  return row;
+}
+
+int LogModel::lineNoAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return 0;
+  }
+
+  return static_cast<int>(rows_[static_cast<size_t>(row)].line_no);
+}
+
 int LogModel::logLevelAt(int row) const {
   if (row < 0 || row >= rowCount()) {
     return static_cast<int>(LogLevel_Info);
   }
 
   return static_cast<int>(rows_[static_cast<size_t>(row)].log_level);
+}
+
+bool LogModel::markedAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return false;
+  }
+
+  return rows_[static_cast<size_t>(row)].mark_color != LineMark_None;
+}
+
+int LogModel::markColorAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return static_cast<int>(LineMark_None);
+  }
+
+  return static_cast<int>(rows_[static_cast<size_t>(row)].mark_color);
 }
 
 int LogModel::nextLineOfLevel(int row, int logLevel) const {
@@ -141,6 +182,16 @@ int LogModel::previousLineOfLevel(int row, int logLevel) const {
   return -1;
 }
 
+bool LogModel::toggleMarkAt(int row, int preferredColor) {
+  if (row < 0 || row >= rowCount()) {
+    return false;
+  }
+
+  const auto next_color =
+      markedAt(row) ? LineMark_None : normalizedMarkColor(preferredColor);
+  return setMarkColorAt(row, next_color);
+}
+
 void LogModel::setFollowing(bool enabled) {
   if (following_ == enabled) {
     return;
@@ -169,6 +220,28 @@ void LogModel::setRequestedScannerName(const QString& name) {
 
   source_->setRequestedScannerName(requested.toStdString());
   emit scannerNameChanged();
+}
+
+LineMarkColor LogModel::normalizedMarkColor(int color) const noexcept {
+  const auto clamped = std::clamp(color, static_cast<int>(LineMark_Default),
+                                  static_cast<int>(LineMark_Accent6));
+  return static_cast<LineMarkColor>(clamped);
+}
+
+bool LogModel::setMarkColorAt(int row, LineMarkColor color) {
+  if (row < 0 || row >= rowCount()) {
+    return false;
+  }
+
+  auto& log_row = rows_[static_cast<size_t>(row)];
+  if (log_row.mark_color == color) {
+    return false;
+  }
+
+  log_row.mark_color = color;
+  const QModelIndex model_index = index(row, 0);
+  emit dataChanged(model_index, model_index, {MarkedRole, MarkColorRole});
+  return true;
 }
 
 LogModel::State LogModel::state() const noexcept {
@@ -219,6 +292,7 @@ void LogModel::setRows(std::vector<LogRow> rows) {
   beginResetModel();
   rows_ = std::move(rows);
   endResetModel();
+  emit lineCountChanged();
 }
 
 void LogModel::appendRow(LogRow row) {
@@ -226,6 +300,7 @@ void LogModel::appendRow(LogRow row) {
   beginInsertRows({}, insert_at, insert_at);
   rows_.push_back(std::move(row));
   endInsertRows();
+  emit lineCountChanged();
 }
 
 void LogModel::markReady() {

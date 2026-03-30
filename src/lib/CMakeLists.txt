@@ -4,6 +4,7 @@ add_library(lgx_lib
   PageCache.cpp
   FileMonitor.cpp
   FileSource.cpp
+  FilterModel.cpp
   LogScanner.cpp
   LogModel.cpp
   OpenLogsModel.cpp
@@ -16,6 +17,7 @@ add_library(lgx_lib
   PageCache.h
   FileMonitor.h
   FileSource.h
+  FilterModel.h
   LogScanner.h
   LogModel.h
   OpenLogsModel.h

@@ -3,6 +3,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QPointer>
+#include <QQmlError>
 #include <QScreen>
 #include <QSettings>
 #include <QVariant>
@@ -126,6 +127,12 @@ int main(int argc, char *argv[]) {
   engine.rootContext()->setContextProperty(QStringLiteral("AppInfo"), &appInfo);
   engine.rootContext()->setContextProperty(QStringLiteral("AppEngine"), &appEngine);
   engine.rootContext()->setContextProperty(QStringLiteral("UiSettings"), &uiSettings);
+  QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
+                   [](const QList<QQmlError>& warnings) {
+                     for (const auto& warning : warnings) {
+                       LOG_ERROR << "QML: " << warning.toString().toStdString();
+                     }
+                   });
   QObject::connect(
     &engine,
     &QQmlApplicationEngine::objectCreationFailed,
