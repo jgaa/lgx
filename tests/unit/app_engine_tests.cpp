@@ -175,5 +175,84 @@ TEST(AppEngineTests, LimitsRecentLogSourcesToTwentyFiveEntries) {
   EXPECT_EQ(restored_engine.recentLogCount(), 25);
 }
 
+TEST(AppEngineTests, PersistsSourceFormatMetadataAndReappliesIt) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("formatted.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("2026-03-31 10:15:00.123 host INFO 42 {worker} hello\n"), 0);
+  file.close();
+
+  const auto url = QUrl::fromLocalFile(path);
+
+  {
+    AppEngine engine;
+    EXPECT_EQ(engine.openLogSource(url), 0);
+
+    auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+    ASSERT_NE(model, nullptr);
+    model->setRequestedScannerName(QStringLiteral("Logfault"));
+    EXPECT_EQ(model->requestedScannerName(), QStringLiteral("Logfault"));
+    engine.releaseLogModel(url);
+  }
+
+  AppEngine restored_engine;
+  auto* restored_model = qobject_cast<LogModel*>(restored_engine.createLogModel(url));
+  ASSERT_NE(restored_model, nullptr);
+  EXPECT_EQ(restored_model->requestedScannerName(), QStringLiteral("Logfault"));
+  restored_engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, LimitsSourceFormatMetadataToOneHundredEntriesAndDeduplicates) {
+  ScopedTestSettings scoped_settings;
+  AppEngine engine;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+
+  for (int index = 0; index < 105; ++index) {
+    const auto path = dir.filePath(QStringLiteral("metadata-%1.log").arg(index));
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    ASSERT_GT(file.write("line\n"), 0);
+    file.close();
+
+    const auto url = QUrl::fromLocalFile(path);
+    auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+    ASSERT_NE(model, nullptr);
+    model->setRequestedScannerName(QStringLiteral("None"));
+    engine.releaseLogModel(url);
+  }
+
+  auto metadata_entries = QSettings{}.value("session/logSourceMetadata").toList();
+  ASSERT_EQ(metadata_entries.size(), 100);
+  EXPECT_EQ(metadata_entries.front().toMap().value("url").toString(),
+            QUrl::fromLocalFile(dir.filePath(QStringLiteral("metadata-104.log"))).toString());
+  EXPECT_EQ(metadata_entries.back().toMap().value("url").toString(),
+            QUrl::fromLocalFile(dir.filePath(QStringLiteral("metadata-5.log"))).toString());
+
+  const auto repeated_url = QUrl::fromLocalFile(dir.filePath(QStringLiteral("metadata-42.log")));
+  auto* repeated_model = qobject_cast<LogModel*>(engine.createLogModel(repeated_url));
+  ASSERT_NE(repeated_model, nullptr);
+  repeated_model->setRequestedScannerName(QStringLiteral("Logfault"));
+  engine.releaseLogModel(repeated_url);
+
+  metadata_entries = QSettings{}.value("session/logSourceMetadata").toList();
+  ASSERT_EQ(metadata_entries.size(), 100);
+  EXPECT_EQ(metadata_entries.front().toMap().value("url").toString(),
+            repeated_url.toString());
+  EXPECT_EQ(metadata_entries.front().toMap().value("scannerName").toString(),
+            QStringLiteral("Logfault"));
+
+  int duplicate_count = 0;
+  for (const auto& entry_value : metadata_entries) {
+    if (entry_value.toMap().value("url").toString() == repeated_url.toString()) {
+      ++duplicate_count;
+    }
+  }
+  EXPECT_EQ(duplicate_count, 1);
+}
+
 }  // namespace
 }  // namespace lgx

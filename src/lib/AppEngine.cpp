@@ -14,6 +14,8 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrlQuery>
+#include <QVariantList>
+#include <QVariantMap>
 
 #include <algorithm>
 
@@ -29,8 +31,44 @@ namespace lgx {
 namespace {
 
 constexpr int kRecentLogSourceLimit = 25;
+constexpr int kLogSourceMetadataLimit = 100;
 constexpr auto kRecentLogSourcesKey = "session/recentLogSources";
 constexpr auto kRecentPipeStreamsKey = "session/recentPipeStreams";
+constexpr auto kLogSourceMetadataKey = "session/logSourceMetadata";
+constexpr auto kLogSourceMetadataUrlKey = "url";
+constexpr auto kLogSourceMetadataScannerNameKey = "scannerName";
+
+QUrl normalizeSourceUrl(const QUrl& url) {
+  return url.adjusted(QUrl::NormalizePathSegments | QUrl::StripTrailingSlash);
+}
+
+QVariantList sanitizedLogSourceMetadataEntries(const QVariant& value) {
+  QVariantList sanitized;
+  QSet<QString> seen_urls;
+  const auto url_key = QString::fromLatin1(kLogSourceMetadataUrlKey);
+  const auto scanner_name_key = QString::fromLatin1(kLogSourceMetadataScannerNameKey);
+  for (const auto& entry_value : value.toList()) {
+    const auto entry = entry_value.toMap();
+    const auto canonical_url = normalizeSourceUrl(QUrl(entry.value(url_key).toString()));
+    const auto scanner_name = entry.value(scanner_name_key).toString().trimmed();
+    const auto encoded_url = canonical_url.toString();
+    if (!canonical_url.isValid() || canonical_url.isEmpty() || scanner_name.isEmpty()
+        || seen_urls.contains(encoded_url)) {
+      continue;
+    }
+
+    seen_urls.insert(encoded_url);
+    QVariantMap metadata_entry;
+    metadata_entry.insert(url_key, encoded_url);
+    metadata_entry.insert(scanner_name_key, scanner_name);
+    sanitized.push_back(metadata_entry);
+    if (sanitized.size() == kLogSourceMetadataLimit) {
+      break;
+    }
+  }
+
+  return sanitized;
+}
 
 QString adbProgramName() {
 #ifdef Q_OS_WIN
@@ -694,9 +732,19 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
   auto* model = new LogModel(canonical, this);
   QQmlEngine::setObjectOwnership(model, QQmlEngine::CppOwnership);
   model->setCurrent(canonical == current_open_log_source_url_);
+  connect(model, &LogModel::scannerNameChanged, this, [this, model, canonical]() {
+    const auto scanner_name = model->scannerName().trimmed();
+    if (!scanner_name.isEmpty()) {
+      saveLogSourceMetadata(canonical, scanner_name);
+    }
+  });
 
   if (canonical.isLocalFile()) {
     auto source = std::make_unique<FileSource>();
+    if (const auto saved_scanner_name = savedLogSourceScannerName(canonical);
+        !saved_scanner_name.isEmpty()) {
+      source->setRequestedScannerName(saved_scanner_name.toStdString());
+    }
     source->open(canonical.toLocalFile().toStdString());
     model->setSource(std::move(source));
     model->setFollowing(UiSettings::instance().followLiveLogsByDefault());
@@ -704,6 +752,10 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
   } else if (StreamSource::isSupportedUrl(canonical)) {
     LOG_INFO << "Creating stream-backed log model for '" << canonical.toString().toStdString() << "'";
     auto source = std::make_unique<StreamSource>();
+    if (const auto saved_scanner_name = savedLogSourceScannerName(canonical);
+        !saved_scanner_name.isEmpty()) {
+      source->setRequestedScannerName(saved_scanner_name.toStdString());
+    }
     source->open(canonical.toString().toStdString());
     model->setSource(std::move(source));
     model->setFollowing(UiSettings::instance().followLiveLogsByDefault());
@@ -927,7 +979,7 @@ QString AppEngine::displaySourceForUrl(const QUrl& url) {
 }
 
 QUrl AppEngine::canonicalUrl(const QUrl& url) {
-  return url.adjusted(QUrl::NormalizePathSegments | QUrl::StripTrailingSlash);
+  return normalizeSourceUrl(url);
 }
 
 void AppEngine::addRecentLogSource(const QUrl& url) {
@@ -1045,6 +1097,57 @@ void AppEngine::loadRecentPipeStreams() {
 
   recent_pipe_streams_.setEntries(std::move(entries));
   emit recentPipeStreamsChanged();
+}
+
+void AppEngine::saveLogSourceMetadata(const QUrl& url, const QString& scanner_name) const {
+  const auto canonical = canonicalUrl(url);
+  const auto normalized_scanner_name = scanner_name.trimmed();
+  if (!canonical.isValid() || canonical.isEmpty() || normalized_scanner_name.isEmpty()) {
+    return;
+  }
+
+  const auto url_key = QString::fromLatin1(kLogSourceMetadataUrlKey);
+  const auto scanner_name_key = QString::fromLatin1(kLogSourceMetadataScannerNameKey);
+  QVariantList entries =
+      sanitizedLogSourceMetadataEntries(QSettings{}.value(kLogSourceMetadataKey));
+  const auto encoded_url = canonical.toString();
+  entries.erase(std::remove_if(entries.begin(), entries.end(),
+                               [&encoded_url](const QVariant& entry_value) {
+                                 return entry_value.toMap().value(QString::fromLatin1(kLogSourceMetadataUrlKey))
+                                     .toString() == encoded_url;
+                               }),
+                entries.end());
+  QVariantMap metadata_entry;
+  metadata_entry.insert(url_key, encoded_url);
+  metadata_entry.insert(scanner_name_key, normalized_scanner_name);
+  entries.prepend(metadata_entry);
+  while (entries.size() > kLogSourceMetadataLimit) {
+    entries.removeLast();
+  }
+
+  QSettings settings;
+  settings.setValue(kLogSourceMetadataKey, entries);
+  settings.sync();
+}
+
+QString AppEngine::savedLogSourceScannerName(const QUrl& url) const {
+  const auto canonical = canonicalUrl(url);
+  if (!canonical.isValid() || canonical.isEmpty()) {
+    return {};
+  }
+
+  const auto url_key = QString::fromLatin1(kLogSourceMetadataUrlKey);
+  const auto scanner_name_key = QString::fromLatin1(kLogSourceMetadataScannerNameKey);
+  const auto encoded_url = canonical.toString();
+  const auto entries = sanitizedLogSourceMetadataEntries(QSettings{}.value(kLogSourceMetadataKey));
+  for (const auto& entry_value : entries) {
+    const auto entry = entry_value.toMap();
+    if (entry.value(url_key).toString() == encoded_url) {
+      return entry.value(scanner_name_key).toString().trimmed();
+    }
+  }
+
+  return {};
 }
 
 }  // namespace lgx

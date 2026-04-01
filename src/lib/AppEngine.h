@@ -200,6 +200,8 @@ class AppEngine : public QObject {
   void addRecentPipeStream(const QUrl& url);
   void removeRecentPipeStream(const QUrl& url);
   void loadRecentPipeStreams();
+  void saveLogSourceMetadata(const QUrl& url, const QString& scanner_name) const;
+  [[nodiscard]] QString savedLogSourceScannerName(const QUrl& url) const;
   void updateCurrentLogModel();
 
   struct ModelEntry {
