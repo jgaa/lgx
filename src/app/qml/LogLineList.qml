@@ -19,6 +19,8 @@ Item {
     property var dragBaseSelection: []
     property int contextMenuLineIndex: -1
     property string contextMenuLineText: ""
+    property int popupLineIndex: -1
+    property string popupLineText: ""
     property real maxRowWidth: 0
     property int pendingMarkColor: 1
     readonly property bool hasSelection: selectedIndexes.length > 0
@@ -35,6 +37,7 @@ Item {
 
     signal rowClicked(int proxyRow, int sourceRow)
     signal activated()
+    signal pageScrollRequested(int deltaPages)
 
     function normalizeIndex(index) {
         return Math.max(0, Math.min(index, listView.count - 1))
@@ -198,10 +201,38 @@ Item {
         AppEngine.copyTextToClipboard(rowModel.plainTextAt(rowIndex))
     }
 
-    function openContextMenu(rowIndex, rowTextValue, globalPoint) {
+    function openContextMenu(rowIndex, rowTextValue, menuPoint) {
         contextMenuLineIndex = rowIndex
         contextMenuLineText = rowTextValue
-        lineContextMenu.popup(globalPoint.x, globalPoint.y)
+        lineContextMenu.popup(menuPoint.x, menuPoint.y)
+    }
+
+    function popupCopyText() {
+        if (!linePopupTextEdit) {
+            return
+        }
+
+        const text = linePopupTextEdit.selectedText.length > 0
+            ? linePopupTextEdit.selectedText
+            : popupLineText
+        if (text.length > 0) {
+            AppEngine.copyTextToClipboard(text)
+        }
+    }
+
+    function openLinePopup(rowIndex, rowTextValue, menuPoint) {
+        popupLineIndex = rowIndex
+        popupLineText = rowTextValue
+        linePopup.open()
+        Qt.callLater(function() {
+            const margin = 12
+            const popupWidth = linePopup.width
+            const popupHeight = linePopup.height
+            linePopup.x = Math.max(margin, Math.min(root.width - popupWidth - margin, menuPoint.x))
+            linePopup.y = Math.max(margin, Math.min(root.height - popupHeight - margin, menuPoint.y))
+            linePopupTextEdit.forceActiveFocus()
+            linePopupTextEdit.deselect()
+        })
     }
 
     function updateTopVisibleIndex() {
@@ -240,6 +271,27 @@ Item {
         listView.contentY = nextContentY
     }
 
+    function scrollByPages(deltaPages) {
+        const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
+        if (maximumContentY <= 0 || deltaPages === 0) {
+            return
+        }
+
+        const nextContentY = Math.max(0, Math.min(maximumContentY, listView.contentY + (listView.height * deltaPages)))
+        listView.contentY = nextContentY
+        updateTopVisibleIndex()
+    }
+
+    function scrollByRows(deltaRows) {
+        if (listView.count <= 0 || deltaRows === 0) {
+            return
+        }
+
+        const targetIndex = normalizeIndex(topVisibleIndex + deltaRows)
+        listView.positionViewAtIndex(targetIndex, ListView.Beginning)
+        updateTopVisibleIndex()
+    }
+
     function selectSingleRow(index, positionMode) {
         if (!rowModel || index < 0 || index >= listView.count) {
             return false
@@ -276,6 +328,20 @@ Item {
     Keys.onPressed: function(event) {
         if (root.updatePendingMarkColorForKey(event.key, true)) {
             event.accepted = true
+            return
+        }
+
+        if (event.key === Qt.Key_PageUp) {
+            root.pageScrollRequested(-1)
+            root.scrollByPages(-1)
+            event.accepted = true
+            return
+        }
+
+        if (event.key === Qt.Key_PageDown) {
+            root.pageScrollRequested(1)
+            root.scrollByPages(1)
+            event.accepted = true
         }
     }
     Keys.onReleased: function(event) {
@@ -289,26 +355,97 @@ Item {
 
         Menu {
             title: qsTr("Copy")
-
-            Menu {
-                title: qsTr("Selection Copy")
+            MenuItem {
+                text: qsTr("Selection")
                 enabled: root.hasSelection
+                onTriggered: root.copySelectionToClipboard()
+            }
 
-                MenuItem {
-                    text: qsTr("Copy")
-                    enabled: root.hasSelection
-                    onTriggered: root.copySelectionToClipboard()
+            MenuItem {
+                text: qsTr("Line")
+                enabled: root.contextMenuLineIndex >= 0
+                onTriggered: root.copyLineToClipboard(root.contextMenuLineIndex)
+            }
+        }
+    }
+
+    Popup {
+        id: linePopup
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        padding: 12
+        width: {
+            const availableWidth = Math.max(120, root.width - 24)
+            return Math.min(availableWidth, Math.max(240, Math.round(root.width * 0.72)))
+        }
+        height: {
+            const availableHeight = Math.max(120, root.height - 24)
+            return Math.min(availableHeight, Math.max(180, Math.round(root.height * 0.72)))
+        }
+
+        background: Rectangle {
+            radius: 8
+            color: "#f8f4ee"
+            border.width: 1
+            border.color: "#c9c0b2"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+
+            Label {
+                Layout.fillWidth: true
+                text: root.popupLineIndex >= 0
+                    ? qsTr("Line %1").arg(root.rowModel ? root.rowModel.lineNoAt(root.popupLineIndex) : root.popupLineIndex + 1)
+                    : qsTr("Line")
+                font.bold: true
+                color: "#4d453b"
+            }
+
+            Frame {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                padding: 0
+
+                ScrollView {
+                    id: linePopupScroll
+                    anchors.fill: parent
+                    clip: true
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                    TextArea {
+                        id: linePopupTextEdit
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                        textFormat: TextEdit.PlainText
+                        text: root.popupLineText
+                        width: Math.max(0, linePopupScroll.availableWidth)
+                        color: "#2b251f"
+                        font.family: UiSettings.logFontFamily
+                        font.pixelSize: UiSettings.effectiveLogFontPixelSize
+                        background: null
+                    }
                 }
             }
 
-            Menu {
-                title: qsTr("Line")
-                enabled: root.contextMenuLineIndex >= 0
+            RowLayout {
+                Layout.fillWidth: true
 
-                MenuItem {
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
                     text: qsTr("Copy")
-                    enabled: root.contextMenuLineIndex >= 0
-                    onTriggered: root.copyLineToClipboard(root.contextMenuLineIndex)
+                    onClicked: root.popupCopyText()
+                }
+
+                Button {
+                    text: qsTr("Close")
+                    onClicked: linePopup.close()
                 }
             }
         }
@@ -470,15 +607,30 @@ Item {
                             if (!root.isIndexSelected(index)) {
                                 root.setSelectedRows([root.selectionEntry(index, message, rawMessage)])
                             }
-                            root.openContextMenu(index, root.rowText(message, rawMessage), mapToGlobal(mouse.x, mouse.y))
+                            root.openContextMenu(index, root.rowText(message, rawMessage),
+                                mapToItem(root, mouse.x, mouse.y))
                             return
                         }
 
                         root.handlePressed(index, message, rawMessage, mouse.modifiers)
                     }
 
+                    onPressAndHold: function(mouse) {
+                        if (mouse.button !== Qt.LeftButton) {
+                            return
+                        }
+
+                        root.finishPointerSelection()
+                        const plainText = root.rowModel ? root.rowModel.plainTextAt(index) : root.rowText(message, rawMessage)
+                        const point = mapToItem(root, mouse.x + 12, mouse.y + 12)
+                        root.openLinePopup(index, plainText, point)
+                    }
+
                     onClicked: function(mouse) {
                         if (mouse.button === Qt.LeftButton) {
+                            if (linePopup.visible) {
+                                return
+                            }
                             root.rowClicked(index, sourceRow)
                         }
                     }
@@ -513,5 +665,23 @@ Item {
         sequences: [StandardKey.Copy]
         enabled: root.hasSelection
         onActivated: root.copySelectionToClipboard()
+    }
+
+    Shortcut {
+        sequences: ["PgUp"]
+        enabled: root.activeFocus
+        onActivated: {
+            root.pageScrollRequested(-1)
+            root.scrollByPages(-1)
+        }
+    }
+
+    Shortcut {
+        sequences: ["PgDown"]
+        enabled: root.activeFocus
+        onActivated: {
+            root.pageScrollRequested(1)
+            root.scrollByPages(1)
+        }
     }
 }

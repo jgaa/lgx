@@ -228,8 +228,22 @@ Item {
 
     function openViewMenu() {
         activateView()
-        const point = viewMenuButton.mapToItem(null, 0, viewMenuButton.height)
+        const point = viewMenuButton.mapToItem(root, 0, viewMenuButton.height)
         viewMenu.popup(point.x, point.y)
+    }
+
+    function scrollByRows(deltaRows) {
+        if (root.following) {
+            root.setFollowing(false)
+        }
+        lineList.scrollByRows(deltaRows)
+    }
+
+    function scrollByPages(deltaPages) {
+        if (root.following) {
+            root.setFollowing(false)
+        }
+        lineList.scrollByPages(deltaPages)
     }
 
     onSourceUrlChanged: acquireLogModel()
@@ -286,6 +300,11 @@ Item {
         followMode: root.following
         emptyText: qsTr("Log is open, but no rows are loaded yet.")
         onActivated: root.activateView()
+        onPageScrollRequested: function() {
+            if (root.following) {
+                root.setFollowing(false)
+            }
+        }
     }
 
     SymbolToolButton {
@@ -309,6 +328,30 @@ Item {
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         z: 1
+    }
+
+    Shortcut {
+        sequences: ["Up"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByRows(-1)
+    }
+
+    Shortcut {
+        sequences: ["Down"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByRows(1)
+    }
+
+    Shortcut {
+        sequences: ["PgUp"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByPages(-1)
+    }
+
+    Shortcut {
+        sequences: ["PgDown"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByPages(1)
     }
 
     Menu {

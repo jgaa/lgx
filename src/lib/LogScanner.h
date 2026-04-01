@@ -42,6 +42,7 @@ class LogFormatScanner {
   virtual ~LogFormatScanner() = default;
 
   [[nodiscard]] virtual const char* name() const noexcept = 0;
+  [[nodiscard]] virtual bool startsLogicalLine(std::string_view physical_line) const noexcept = 0;
   [[nodiscard]] virtual FastScanResult scanLineFast(std::string_view line) const noexcept = 0;
   [[nodiscard]] virtual std::vector<ParsedLineMetadata> buildLineIndex(
       std::string_view page_bytes) const = 0;

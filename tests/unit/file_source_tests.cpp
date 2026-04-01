@@ -240,5 +240,85 @@ TEST(FileSourceTests, ResetInvalidatesAllCachedPages) {
   EXPECT_FALSE(source.sharedPageCache().contains(page_key));
 }
 
+TEST(FileSourceTests, LogfaultScannerMergesMultilineEventsDuringIndexing) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "logfault-multiline.log",
+      "2026-04-01 18:49:13.003 EEST TRACE 52208 Executing prepare-stmt SQL query: "
+      "INSERT INTO request_state (userid, devid, instance, request_id)\n"
+      "                    VALUES (?, ?, ?, ?)\n"
+      "                    ON DUPLICATE KEY UPDATE\n"
+      "                        request_id = VALUES(request_id),\n"
+      "                        last_update = CURRENT_TIMESTAMP\n"
+      "2026-04-01 18:49:13.003 EEST TRACE 52200 Executing stmt SQL query: "
+      "INSERT INTO request_state (userid, devid, instance, request_id)\n"
+      "                    VALUES (?, ?, ?, ?)\n"
+      "                    ON DUPLICATE KEY UPDATE\n"
+      "                        request_id = VALUES(request_id),\n"
+      "                        last_update = CURRENT_TIMESTAMP | args: a, b, 1, 0\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Logfault");
+  source.startIndexing();
+
+  const auto snapshot = source.snapshot();
+  EXPECT_EQ(snapshot.state, SourceState::Ready);
+  EXPECT_EQ(snapshot.line_count, 2U);
+
+  SourceLines fetched;
+  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 2U);
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Trace);
+  EXPECT_NE(fetched.lines[0].text.find("VALUES (?, ?, ?, ?)"), std::string::npos);
+  EXPECT_NE(fetched.lines[0].text.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
+  EXPECT_NE(fetched.lines[1].text.find("| args: a, b, 1, 0"), std::string::npos);
+}
+
+TEST(FileSourceTests, LogfaultScannerExtendsPreviousEventWhenRefreshStartsWithContinuation) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "logfault-append.log",
+      "2026-04-01 18:49:13.003 EEST TRACE 52208 Executing prepare-stmt SQL query: "
+      "INSERT INTO request_state (userid, devid, instance, request_id)\n");
+
+  FileSource source;
+  uint64_t appended_count = 0;
+  source.setCallbacks(SourceCallbacks{
+      .on_lines_appended =
+          [&appended_count](uint64_t, uint64_t count) {
+            appended_count = count;
+          },
+  });
+
+  source.open(path.string());
+  source.setRequestedScannerName("Logfault");
+  source.startIndexing();
+
+  EXPECT_EQ(source.snapshot().line_count, 1U);
+
+  writeFile(
+      path,
+      "2026-04-01 18:49:13.003 EEST TRACE 52208 Executing prepare-stmt SQL query: "
+      "INSERT INTO request_state (userid, devid, instance, request_id)\n"
+      "                    VALUES (?, ?, ?, ?)\n"
+      "                    ON DUPLICATE KEY UPDATE\n"
+      "                        last_update = CURRENT_TIMESTAMP\n"
+      "2026-04-01 18:49:13.004 EEST INFO 52208 Done\n");
+  source.refresh();
+
+  EXPECT_EQ(source.snapshot().line_count, 2U);
+  EXPECT_EQ(appended_count, 1U);
+
+  SourceLines fetched;
+  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 2U);
+  EXPECT_NE(fetched.lines[0].text.find("VALUES (?, ?, ?, ?)"), std::string::npos);
+  EXPECT_NE(fetched.lines[0].text.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
+  EXPECT_EQ(fetched.lines[1].text, "2026-04-01 18:49:13.004 EEST INFO 52208 Done");
+}
+
 }  // namespace
 }  // namespace lgx

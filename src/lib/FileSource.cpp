@@ -434,8 +434,13 @@ size_t FileSource::scanAppendedBytes(uint64_t start_offset) {
           logical_line.remove_suffix(1);
         }
 
-        appendIndexedLine(carry_start_offset, logical_line.size(), carryover.size() + 1U,
-                          scanner_->scanLineFast(logical_line));
+        const auto stored_bytes = carryover.size() + 1U;
+        if (!lines_.empty() && !scanner_->startsLogicalLine(logical_line)) {
+          extendLastIndexedLine(stored_bytes);
+        } else {
+          appendIndexedLine(carry_start_offset, logical_line.size(), stored_bytes,
+                            scanner_->scanLineFast(logical_line));
+        }
         carryover.clear();
         pending_line_offset_.reset();
       } else {
@@ -445,8 +450,13 @@ size_t FileSource::scanAppendedBytes(uint64_t start_offset) {
         }
 
         const auto file_offset = chunk_start_offset + line_start;
-        appendIndexedLine(file_offset, logical_line.size(), (line_end - line_start) + 1U,
-                          scanner_->scanLineFast(logical_line));
+        const auto stored_bytes = (line_end - line_start) + 1U;
+        if (!lines_.empty() && !scanner_->startsLogicalLine(logical_line)) {
+          extendLastIndexedLine(stored_bytes);
+        } else {
+          appendIndexedLine(file_offset, logical_line.size(), stored_bytes,
+                            scanner_->scanLineFast(logical_line));
+        }
       }
 
       line_start = index + 1U;
@@ -524,6 +534,21 @@ void FileSource::appendIndexedLine(uint64_t file_offset, uint32_t logical_length
       .line_index_in_page = static_cast<uint32_t>(line_index_in_page),
       .log_level = scan.log_level,
   });
+}
+
+void FileSource::extendLastIndexedLine(size_t stored_bytes) {
+  if (lines_.empty() || pageMetadata().empty() || stored_bytes == 0) {
+    return;
+  }
+
+  auto& line = lines_.back();
+  line.length = static_cast<uint32_t>(line.length + stored_bytes);
+
+  const auto page_index = pageMetadata().size() - 1U;
+  auto& page = pageMetadata().back();
+  page.setSize(page.size() + stored_bytes);
+  page.clearLineIndex();
+  sharedPageCache().invalidate(PageKey{sourceId(), page_index});
 }
 
 void FileSource::startWatching() {

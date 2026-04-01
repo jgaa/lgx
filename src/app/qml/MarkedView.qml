@@ -56,8 +56,16 @@ Item {
 
     function openViewMenu() {
         activateView()
-        const point = viewMenuButton.mapToItem(null, 0, viewMenuButton.height)
+        const point = viewMenuButton.mapToItem(root, 0, viewMenuButton.height)
         viewMenu.popup(point.x, point.y)
+    }
+
+    function scrollByRows(deltaRows) {
+        lineList.scrollByRows(deltaRows)
+    }
+
+    function scrollByPages(deltaPages) {
+        lineList.scrollByPages(deltaPages)
     }
 
     onSourceUrlChanged: acquireMarkedModel()
@@ -141,6 +149,30 @@ Item {
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         z: 1
+    }
+
+    Shortcut {
+        sequences: ["Up"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByRows(-1)
+    }
+
+    Shortcut {
+        sequences: ["Down"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByRows(1)
+    }
+
+    Shortcut {
+        sequences: ["PgUp"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByPages(-1)
+    }
+
+    Shortcut {
+        sequences: ["PgDown"]
+        enabled: root.activeFocus
+        onActivated: root.scrollByPages(1)
     }
 
     Menu {

@@ -76,6 +76,7 @@ class FileSource final : public LogSource {
   void clearIndexedState();
   void appendIndexedLine(uint64_t file_offset, uint32_t logical_length, size_t stored_bytes,
                          FastScanResult scan);
+  void extendLastIndexedLine(size_t stored_bytes);
   void startWatching();
   void stopWatching();
   void handleWatchHint(FileEventHint hint);

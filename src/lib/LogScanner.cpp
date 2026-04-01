@@ -72,6 +72,10 @@ using namespace std::literals;
   return date_time.toMSecsSinceEpoch();
 }
 
+[[nodiscard]] bool startsLogfaultRecord(std::string_view line) noexcept {
+  return parseTimestampMillis(line).has_value();
+}
+
 [[nodiscard]] std::optional<int64_t> parseLogcatTimestampMillis(
     std::string_view line) noexcept {
   if (line.size() < 18 || line[2] != '-' || line[5] != ' ' || line[8] != ':'
@@ -302,6 +306,9 @@ using namespace std::literals;
 class LogfaultScanner final : public LogFormatScanner {
  public:
   [[nodiscard]] const char* name() const noexcept override { return "Logfault"; }
+  [[nodiscard]] bool startsLogicalLine(std::string_view physical_line) const noexcept override {
+    return startsLogfaultRecord(physical_line);
+  }
 
   [[nodiscard]] FastScanResult scanLineFast(std::string_view line) const noexcept override {
     const auto parsed = parseLogfaultLine(line, 0);
@@ -323,6 +330,7 @@ class LogfaultScanner final : public LogFormatScanner {
       return lines;
     }
 
+    std::optional<ParsedLineMetadata> current;
     size_t line_start = 0;
     for (size_t index = 0; index < page_bytes.size(); ++index) {
       if (page_bytes[index] != '\n') {
@@ -333,8 +341,15 @@ class LogfaultScanner final : public LogFormatScanner {
       if (line_end > line_start && page_bytes[line_end - 1U] == '\r') {
         --line_end;
       }
-      lines.push_back(parseLogfaultLine(page_bytes.substr(line_start, line_end - line_start),
-                                        static_cast<uint32_t>(line_start)));
+      const auto line = page_bytes.substr(line_start, line_end - line_start);
+      if (!current || startsLogfaultRecord(line)) {
+        if (current) {
+          lines.push_back(*current);
+        }
+        current = parseLogfaultLine(line, static_cast<uint32_t>(line_start));
+      } else {
+        current->line_length = static_cast<uint32_t>(line_end - current->line_offset);
+      }
       line_start = index + 1U;
     }
 
@@ -343,8 +358,19 @@ class LogfaultScanner final : public LogFormatScanner {
       if (line_end > line_start && page_bytes[line_end - 1U] == '\r') {
         --line_end;
       }
-      lines.push_back(parseLogfaultLine(page_bytes.substr(line_start, line_end - line_start),
-                                        static_cast<uint32_t>(line_start)));
+      const auto line = page_bytes.substr(line_start, line_end - line_start);
+      if (!current || startsLogfaultRecord(line)) {
+        if (current) {
+          lines.push_back(*current);
+        }
+        current = parseLogfaultLine(line, static_cast<uint32_t>(line_start));
+      } else {
+        current->line_length = static_cast<uint32_t>(line_end - current->line_offset);
+      }
+    }
+
+    if (current) {
+      lines.push_back(*current);
     }
 
     return lines;
@@ -354,6 +380,7 @@ class LogfaultScanner final : public LogFormatScanner {
 class LogcatScanner final : public LogFormatScanner {
  public:
   [[nodiscard]] const char* name() const noexcept override { return "Logcat"; }
+  [[nodiscard]] bool startsLogicalLine(std::string_view) const noexcept override { return true; }
 
   [[nodiscard]] FastScanResult scanLineFast(std::string_view line) const noexcept override {
     const auto parsed = parseLogcatLine(line, 0);
@@ -406,6 +433,7 @@ class LogcatScanner final : public LogFormatScanner {
 class NoneScanner final : public LogFormatScanner {
  public:
   [[nodiscard]] const char* name() const noexcept override { return "None"; }
+  [[nodiscard]] bool startsLogicalLine(std::string_view) const noexcept override { return true; }
 
   [[nodiscard]] FastScanResult scanLineFast(std::string_view) const noexcept override {
     return {};
