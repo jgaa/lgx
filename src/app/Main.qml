@@ -788,11 +788,7 @@ ApplicationWindow {
 
                     padding: 0
                     width: implicitWidth
-                    implicitWidth: tabContent.implicitWidth + 24
-                    leftPadding: 0
-                    rightPadding: 0
-                    topPadding: 0
-                    bottomPadding: 0
+                    implicitWidth: tabContent.implicitWidth + leftPadding + rightPadding
                     
                     Component.onCompleted: {
                         if (sourceUrl && sourceUrl.toString().length > 0) {
@@ -812,7 +808,6 @@ ApplicationWindow {
 
                         Image {
                             Layout.alignment: Qt.AlignVCenter
-                            Layout.leftMargin: 10
                             source: tabButton.sourceIconSource
                             sourceSize.width: 16
                             sourceSize.height: 16
@@ -825,9 +820,10 @@ ApplicationWindow {
 
                         Label {
                             Layout.alignment: Qt.AlignVCenter
+                            Layout.fillWidth: true
                             text: title
                             elide: Text.ElideRight
-                            color: tabButton.checked ? "#2c2823" : "#5b544d"
+                            color: tabButton.palette.buttonText
                             font.bold: !!tabButton.tabLogModel && tabButton.tabLogModel.active
                         }
 
@@ -837,8 +833,8 @@ ApplicationWindow {
                             implicitHeight: 18
                             symbolPixelSize: 12
                             symbol: "close"
-                            fgColor: tabButton.checked ? "#5a534c" : "#726a61"
-                            bgColor: tabButton.checked ? "#d7d2c9" : "#e8e2d8"
+                            fgColor: tabButton.palette.buttonText
+                            bgColor: "transparent"
                             focusPolicy: Qt.NoFocus
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Close tab")
@@ -849,10 +845,14 @@ ApplicationWindow {
                     background: Rectangle {
                         radius: 6
                         color: tabButton.checked
-                            ? "#f4f1ea"
-                            : (tabButton.hovered ? "#ece5da" : "#ddd5c8")
-                        border.width: tabButton.checked ? 1 : 0
-                        border.color: "#bdb3a5"
+                            ? Qt.lighter(tabButton.palette.base, 1.02)
+                            : (tabButton.hovered
+                                ? Qt.darker(tabButton.palette.window, 1.03)
+                                : Qt.darker(tabButton.palette.window, 1.06))
+                        border.width: 1
+                        border.color: tabButton.checked
+                            ? Qt.darker(tabButton.palette.base, 1.15)
+                            : Qt.darker(tabButton.palette.window, 1.15)
                     }
                 }
             }
