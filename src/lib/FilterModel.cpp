@@ -29,6 +29,7 @@ FilterModel::FilterModel(LogModel* source_model, QObject* parent)
       filtered_rows_.clear();
       endResetModel();
     });
+    connect(source_model_, &LogModel::scannerNameChanged, this, &FilterModel::scannerNameChanged);
   }
 
   updateRegex();
@@ -65,6 +66,8 @@ QHash<int, QByteArray> FilterModel::roleNames() const {
       {DateRole, "date"},
       {TagsRole, "tags"},
       {ThreadIdRole, "threadId"},
+      {PidRole, "pid"},
+      {TidRole, "tid"},
   };
 }
 
@@ -100,6 +103,14 @@ QString FilterModel::regexError() const {
   return regex_error_;
 }
 
+QString FilterModel::scannerName() const {
+  return source_model_ ? source_model_->scannerName() : QString{};
+}
+
+int FilterModel::selectedPid() const noexcept {
+  return selected_pid_;
+}
+
 QString FilterModel::plainTextAt(int row) const {
   if (!source_model_) {
     return {};
@@ -115,6 +126,19 @@ int FilterModel::sourceRowAt(int row) const {
   }
 
   return filtered_rows_.at(row);
+}
+
+int FilterModel::proxyRowAtOrAfterSourceRow(int source_row) const {
+  if (source_row < 0 || filtered_rows_.isEmpty()) {
+    return -1;
+  }
+
+  const auto it = std::lower_bound(filtered_rows_.cbegin(), filtered_rows_.cend(), source_row);
+  if (it != filtered_rows_.cend()) {
+    return static_cast<int>(std::distance(filtered_rows_.cbegin(), it));
+  }
+
+  return filtered_rows_.size() - 1;
 }
 
 int FilterModel::lineNoAt(int row) const {
@@ -133,6 +157,24 @@ int FilterModel::logLevelAt(int row) const {
 
   const int source_row = sourceRowAt(row);
   return source_row >= 0 ? source_model_->logLevelAt(source_row) : static_cast<int>(LogLevel_Info);
+}
+
+int FilterModel::pidAt(int row) const {
+  if (!source_model_) {
+    return 0;
+  }
+
+  const int source_row = sourceRowAt(row);
+  return source_row >= 0 ? source_model_->pidAt(source_row) : 0;
+}
+
+int FilterModel::tidAt(int row) const {
+  if (!source_model_) {
+    return 0;
+  }
+
+  const int source_row = sourceRowAt(row);
+  return source_row >= 0 ? source_model_->tidAt(source_row) : 0;
 }
 
 bool FilterModel::markedAt(int row) const {
@@ -251,6 +293,21 @@ void FilterModel::setAutoRefresh(bool enabled) {
   }
 }
 
+void FilterModel::setSelectedPid(int pid) {
+  const int normalized = std::max(0, pid);
+  if (selected_pid_ == normalized) {
+    return;
+  }
+
+  selected_pid_ = normalized;
+  emit selectedPidChanged();
+  if (auto_refresh_) {
+    scheduleRefresh();
+  } else {
+    markDirty();
+  }
+}
+
 bool FilterModel::matchesSourceRow(int source_row) const {
   if (!source_model_ || source_row < 0 || source_row >= source_model_->rowCount()) {
     return false;
@@ -265,7 +322,11 @@ bool FilterModel::matchesSourceRow(int source_row) const {
   }
 
   const bool has_text_filter = !pattern_.isEmpty();
-  if (!any_level_enabled && !has_text_filter) {
+  if (!any_level_enabled && !has_text_filter && selected_pid_ == 0) {
+    return false;
+  }
+
+  if (selected_pid_ > 0 && source_model_->pidAt(source_row) != selected_pid_) {
     return false;
   }
 
@@ -329,7 +390,7 @@ void FilterModel::rebuildFilter() {
     }
 
     const bool has_text_filter = !pattern_.isEmpty();
-    if (any_level_enabled && !has_text_filter) {
+    if (any_level_enabled && !has_text_filter && selected_pid_ == 0) {
       QVector<int> next_source_rows;
       next_source_rows.reserve(enabled_levels.size());
       for (int level : enabled_levels) {

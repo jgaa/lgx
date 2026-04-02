@@ -39,6 +39,8 @@ enum class SourceResetReason {
 struct SourceLine {
   uint64_t line_number{};
   LogLevel log_level{LogLevel_Info};
+  uint32_t pid{};
+  uint32_t tid{};
   std::string text;
   std::string function_name;
   std::string message;

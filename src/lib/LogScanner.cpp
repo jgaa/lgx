@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <string_view>
 
 namespace lgx {
@@ -246,6 +247,22 @@ struct TimestampPrefix {
     ++end;
   }
   return std::make_pair(start, end);
+}
+
+[[nodiscard]] std::optional<uint32_t> parseUnsignedToken(std::string_view token) noexcept {
+  if (token.empty()) {
+    return std::nullopt;
+  }
+
+  uint32_t value = 0;
+  const auto* begin = token.data();
+  const auto* end = token.data() + token.size();
+  const auto result = std::from_chars(begin, end, value);
+  if (result.ec != std::errc{} || result.ptr != end) {
+    return std::nullopt;
+  }
+
+  return value;
 }
 
 [[nodiscard]] LogLevel parseLevelToken(std::string_view token) noexcept {
@@ -496,14 +513,21 @@ struct GenericLevelMatch {
   }
 
   const auto pid_token = *token;
+  if (const auto pid = parseUnsignedToken(line.substr(pid_token.first, pid_token.second - pid_token.first))) {
+    parsed.pid = *pid;
+  }
 
   token = nextToken(line, pid_token.second);
   if (!token) {
     return parsed;
   }
   const auto tid_token = *token;
-  parsed.thread_id = ParsedSpan{static_cast<uint32_t>(token->first),
-                                static_cast<uint32_t>(token->second - token->first)};
+  if (const auto tid = parseUnsignedToken(line.substr(tid_token.first, tid_token.second - tid_token.first))) {
+    parsed.tid = *tid;
+  } else {
+    parsed.thread_id = ParsedSpan{static_cast<uint32_t>(token->first),
+                                  static_cast<uint32_t>(token->second - token->first)};
+  }
 
   token = nextToken(line, tid_token.second);
   if (!token) {

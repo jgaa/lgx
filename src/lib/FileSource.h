@@ -45,6 +45,7 @@ class FileSource final : public LogSource {
                                                               LogLevel level) const override;
 
  private:
+  void closeInternal(bool invalidate_pages);
   struct FileIdentity {
     uint64_t device{};
     uint64_t inode{};

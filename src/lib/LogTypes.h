@@ -45,6 +45,8 @@ inline constexpr size_t number_of_line_mark_slots = 7;
  */
 struct LogRow {
   qsizetype line_no{};
+  qint64 pid{};
+  qint64 tid{};
   QString function_name;
   LogLevel log_level{LogLevel_Info};
   LineMarkColor mark_color{LineMark_None};

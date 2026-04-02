@@ -11,6 +11,8 @@ namespace {
 LogRow makeRow(const SourceLine& line) {
   return LogRow{
       .line_no = static_cast<qsizetype>(line.line_number + 1U),
+      .pid = line.pid,
+      .tid = line.tid,
       .function_name = QString::fromStdString(line.function_name),
       .log_level = line.log_level,
       .raw_message = QString::fromStdString(line.text),
@@ -76,6 +78,10 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
       return row.function_name;
     case LogLevelRole:
       return QVariant::fromValue(static_cast<int>(row.log_level));
+    case PidRole:
+      return QVariant::fromValue(row.pid);
+    case TidRole:
+      return QVariant::fromValue(row.tid);
     case MarkedRole:
       return row.mark_color != LineMark_None;
     case MarkColorRole:
@@ -108,6 +114,8 @@ QHash<int, QByteArray> LogModel::roleNames() const {
       {DateRole, "date"},
       {TagsRole, "tags"},
       {ThreadIdRole, "threadId"},
+      {PidRole, "pid"},
+      {TidRole, "tid"},
   };
 }
 
@@ -142,6 +150,22 @@ int LogModel::logLevelAt(int row) const {
   }
 
   return static_cast<int>(rows_[static_cast<size_t>(row)].log_level);
+}
+
+int LogModel::pidAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return 0;
+  }
+
+  return static_cast<int>(rows_[static_cast<size_t>(row)].pid);
+}
+
+int LogModel::tidAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return 0;
+  }
+
+  return static_cast<int>(rows_[static_cast<size_t>(row)].tid);
 }
 
 bool LogModel::markedAt(int row) const {

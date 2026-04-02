@@ -12,8 +12,14 @@ Item {
     property int nodeId: -1
     property var filterModel: null
     property var claimedFilterModel: null
+    property var processOptions: [{ pid: 0, name: "", label: qsTr("All processes") }]
+    property bool pendingScrollRestore: false
+    property bool pendingTailAfterRefresh: false
+    property int pendingTopSourceRow: -1
     readonly property bool hasSelection: lineList.hasSelection
     readonly property string selectedText: lineList.selectedText
+    readonly property bool supportsProcessFilter: !!filterModel && filterModel.scannerName === "Logcat"
+    readonly property int selectedProcessIndex: processIndexForPid(filterModel ? filterModel.selectedPid : 0)
     readonly property var levelDefinitions: [
         { level: 0, label: qsTr("Error") },
         { level: 1, label: qsTr("Warning") },
@@ -39,14 +45,21 @@ Item {
         filterModel = createdModel
     }
 
+    function defaultProcessOptions() {
+        return [{ pid: 0, name: "", label: qsTr("All processes") }]
+    }
+
     function releaseFilterModel() {
         if (!claimedFilterModel) {
             return
         }
 
-        AppEngine.releaseFilterModel(claimedFilterModel)
+        processCombo.popup.close()
+        const modelToRelease = claimedFilterModel
         claimedFilterModel = null
         filterModel = null
+        processOptions = defaultProcessOptions()
+        AppEngine.releaseFilterModel(modelToRelease)
     }
 
     function activateView() {
@@ -90,16 +103,107 @@ Item {
         }
     }
 
+    function processIndexForPid(pid) {
+        for (let index = 0; index < processOptions.length; ++index) {
+            if (processOptions[index].pid === pid) {
+                return index
+            }
+        }
+        return 0
+    }
+
+    function refreshProcessOptions() {
+        if (!supportsProcessFilter || !sourceUrl || sourceUrl.toString().length === 0) {
+            processOptions = defaultProcessOptions()
+            return
+        }
+
+        processOptions = AppEngine.logcatProcessesForSource(sourceUrl)
+        if (!processOptions || processOptions.length === 0) {
+            processOptions = defaultProcessOptions()
+        }
+    }
+
+    function rememberScrollPositionBeforeRefresh() {
+        if (!filterModel || lineList.lineCount <= 0) {
+            pendingScrollRestore = false
+            pendingTailAfterRefresh = false
+            pendingTopSourceRow = -1
+            return
+        }
+
+        pendingTailAfterRefresh = lineList.isEffectivelyAtEnd()
+        pendingTopSourceRow = filterModel.sourceRowAt(lineList.topVisibleIndex)
+        pendingScrollRestore = pendingTailAfterRefresh || pendingTopSourceRow >= 0
+    }
+
+    function restoreScrollPositionAfterRefresh() {
+        if (!pendingScrollRestore) {
+            return
+        }
+
+        pendingScrollRestore = false
+
+        if (lineList.lineCount <= 0) {
+            pendingTailAfterRefresh = false
+            pendingTopSourceRow = -1
+            return
+        }
+
+        if (pendingTailAfterRefresh) {
+            pendingTailAfterRefresh = false
+            pendingTopSourceRow = -1
+            lineList.scrollToLast()
+            return
+        }
+
+        const targetSourceRow = pendingTopSourceRow
+        pendingTailAfterRefresh = false
+        pendingTopSourceRow = -1
+        if (!filterModel || targetSourceRow < 0) {
+            return
+        }
+
+        const targetProxyRow = filterModel.proxyRowAtOrAfterSourceRow(targetSourceRow)
+        if (targetProxyRow >= 0) {
+            lineList.positionViewAtRow(targetProxyRow, ListView.Beginning)
+        }
+    }
+
     onSourceUrlChanged: acquireFilterModel()
     onWorkspaceChanged: registerWithWorkspace()
+    onSupportsProcessFilterChanged: {
+        if (supportsProcessFilter) {
+            refreshProcessOptions()
+        } else {
+            processOptions = defaultProcessOptions()
+        }
+    }
     onFilterModelChanged: {
         filterField.text = filterModel ? filterModel.pattern : ""
+        if (supportsProcessFilter) {
+            refreshProcessOptions()
+        } else {
+            processOptions = defaultProcessOptions()
+        }
     }
     Component.onCompleted: {
         acquireFilterModel()
         registerWithWorkspace()
     }
     Component.onDestruction: releaseFilterModel()
+
+    Connections {
+        target: root.filterModel
+
+        function onModelAboutToBeReset() {
+            root.rememberScrollPositionBeforeRefresh()
+        }
+
+        function onModelReset() {
+            Qt.callLater(root.restoreScrollPositionAfterRefresh)
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -127,6 +231,19 @@ Item {
                         levelsPopup.x = point.x
                         levelsPopup.y = point.y
                         levelsPopup.open()
+                    }
+                }
+
+                ComboBox {
+                    id: processCombo
+                    visible: root.supportsProcessFilter
+                    model: root.processOptions
+                    textRole: "label"
+                    currentIndex: root.selectedProcessIndex
+                    onActivated: {
+                        if (root.filterModel && currentIndex >= 0 && currentIndex < root.processOptions.length) {
+                            root.filterModel.selectedPid = root.processOptions[currentIndex].pid
+                        }
                     }
                 }
 

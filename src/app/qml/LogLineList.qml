@@ -308,6 +308,16 @@ Item {
         return true
     }
 
+    function positionViewAtRow(index, positionMode) {
+        if (index < 0 || index >= listView.count) {
+            return false
+        }
+
+        listView.positionViewAtIndex(index, positionMode !== undefined ? positionMode : ListView.Beginning)
+        updateTopVisibleIndex()
+        return true
+    }
+
     function revealSourceRow(sourceRow, shouldScroll, positionMode) {
         if (!rowModel || listView.count <= 0 || sourceRow < 0) {
             return false

@@ -60,6 +60,8 @@ QHash<int, QByteArray> MarkedModel::roleNames() const {
       {DateRole, "date"},
       {TagsRole, "tags"},
       {ThreadIdRole, "threadId"},
+      {PidRole, "pid"},
+      {TidRole, "tid"},
   };
 }
 

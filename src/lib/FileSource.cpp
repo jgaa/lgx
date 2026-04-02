@@ -50,7 +50,7 @@ FileSource::FileSource(std::shared_ptr<IFileMonitor> file_monitor)
       scanner_(createDefaultLogScanner()) {}
 
 FileSource::~FileSource() {
-  close();
+  closeInternal(false);
 }
 
 std::string FileSource::path() const {
@@ -80,13 +80,19 @@ void FileSource::open(const std::string& path) {
 }
 
 void FileSource::close() {
+  closeInternal(true);
+}
+
+void FileSource::closeInternal(bool invalidate_pages) {
   if (!open_ && path_.empty() && lines_.empty() && pageMetadata().empty()) {
     return;
   }
 
   open_ = false;
   stopWatching();
-  invalidateAllPages();
+  if (invalidate_pages) {
+    invalidateAllPages();
+  }
 
   path_.clear();
   state_ = SourceState::Idle;
@@ -671,6 +677,8 @@ SourceLines FileSource::collectLines(uint64_t first_line, size_t count) const {
     SourceLine source_line{
         .line_number = first_line + i,
         .log_level = line.log_level,
+        .pid = 0,
+        .tid = 0,
         .text = raw_text,
         .message = raw_text,
     };
@@ -678,6 +686,8 @@ SourceLines FileSource::collectLines(uint64_t first_line, size_t count) const {
     if (page_local_index < line_index.lines.size()) {
       const auto& parsed = line_index.lines[page_local_index];
       source_line.log_level = parsed.log_level;
+      source_line.pid = parsed.pid;
+      source_line.tid = parsed.tid;
       source_line.thread_id = std::string(sliceSpan(page->lineAt(page_local_index), parsed.thread_id));
       source_line.function_name =
           std::string(sliceSpan(page->lineAt(page_local_index), parsed.function_name));

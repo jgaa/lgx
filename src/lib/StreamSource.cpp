@@ -276,7 +276,7 @@ StreamSource::StreamSource() {
 }
 
 StreamSource::~StreamSource() {
-  close();
+  closeInternal(false);
 }
 
 bool StreamSource::isSupportedUrl(const QUrl& url) {
@@ -459,6 +459,10 @@ void StreamSource::open(const std::string& path) {
 }
 
 void StreamSource::close() {
+  closeInternal(true);
+}
+
+void StreamSource::closeInternal(bool invalidate_pages) {
   if (!open_ && !provider_ && spool_path_.isEmpty() && !spool_file_.isOpen()
       && pending_bytes_.isEmpty()) {
     return;
@@ -475,7 +479,9 @@ void StreamSource::close() {
   failed_ = false;
   provider_.reset();
   spool_source_.setCallbacks({});
-  spool_source_.close();
+  if (invalidate_pages) {
+    spool_source_.close();
+  }
   if (spool_file_.isOpen()) {
     spool_file_.close();
   }

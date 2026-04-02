@@ -12,6 +12,7 @@
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QUuid>
 #include <QQmlEngine>
 #include <QSettings>
@@ -103,6 +104,128 @@ QString adbProgramName() {
 bool isExecutableFile(const QString& path) {
   const QFileInfo info(path);
   return info.exists() && info.isFile() && info.isExecutable();
+}
+
+QString processLabel(const QString& name, int pid) {
+  if (name.trimmed().isEmpty()) {
+    return QObject::tr("PID %1").arg(pid);
+  }
+
+  return QObject::tr("%1 (%2)").arg(name.trimmed()).arg(pid);
+}
+
+QHash<int, QString> parseAdbProcessOutput(const QString& text) {
+  QHash<int, QString> processes;
+  const auto lines = text.split(QRegularExpression(QStringLiteral("[\r\n]+")),
+                                Qt::SkipEmptyParts);
+  if (lines.isEmpty()) {
+    return processes;
+  }
+
+  auto parse_pid = [](QStringView token) -> int {
+    bool ok = false;
+    const int value = token.toInt(&ok);
+    return ok ? value : -1;
+  };
+
+  auto insert_process = [&processes](int pid, QString name) {
+    if (pid <= 0) {
+      return;
+    }
+    name = name.trimmed();
+    if (name.isEmpty()) {
+      return;
+    }
+    processes.insert(pid, name);
+  };
+
+  const auto first_tokens = lines.front().simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+  const int pid_header_index = first_tokens.indexOf(QStringLiteral("PID"));
+  int name_header_index = first_tokens.indexOf(QStringLiteral("NAME"));
+  if (name_header_index < 0) {
+    name_header_index = first_tokens.indexOf(QStringLiteral("CMDLINE"));
+  }
+  if (name_header_index < 0) {
+    name_header_index = first_tokens.indexOf(QStringLiteral("ARGS"));
+  }
+
+  if (pid_header_index >= 0) {
+    for (int line_index = 1; line_index < lines.size(); ++line_index) {
+      const auto tokens = lines.at(line_index).simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+      if (tokens.size() <= pid_header_index) {
+        continue;
+      }
+
+      const int pid = parse_pid(tokens.at(pid_header_index));
+      if (pid <= 0) {
+        continue;
+      }
+
+      QString name;
+      if (name_header_index >= 0 && name_header_index < tokens.size()) {
+        name = tokens.mid(name_header_index).join(QLatin1Char(' '));
+      } else if (!tokens.isEmpty()) {
+        name = tokens.back();
+      }
+      insert_process(pid, name);
+    }
+    return processes;
+  }
+
+  for (const auto& line : lines) {
+    const auto tokens = line.simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (tokens.size() < 2) {
+      continue;
+    }
+
+    int pid = parse_pid(tokens.front());
+    QString name;
+    if (pid > 0) {
+      name = tokens.mid(1).join(QLatin1Char(' '));
+    } else {
+      pid = parse_pid(tokens.value(1));
+      if (pid > 0) {
+        name = tokens.back();
+      }
+    }
+    insert_process(pid, name);
+  }
+
+  return processes;
+}
+
+QHash<int, QString> queryAdbProcessesForSerial(const QString& adb_path, const QString& serial) {
+  if (!isExecutableFile(adb_path) || serial.trimmed().isEmpty()) {
+    return {};
+  }
+
+  auto run_query = [&adb_path, &serial](const QStringList& arguments) -> QString {
+    QProcess process;
+    process.setProgram(adb_path);
+    process.setArguments(arguments);
+    process.start();
+    if (!process.waitForFinished(3000)) {
+      process.kill();
+      process.waitForFinished(200);
+      return {};
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+      return {};
+    }
+    return QString::fromUtf8(process.readAllStandardOutput());
+  };
+
+  const auto table =
+      run_query({QStringLiteral("-s"), serial, QStringLiteral("shell"), QStringLiteral("ps"),
+                 QStringLiteral("-A"), QStringLiteral("-o"), QStringLiteral("PID,NAME")});
+  if (!table.trimmed().isEmpty()) {
+    return parseAdbProcessOutput(table);
+  }
+
+  const auto fallback =
+      run_query({QStringLiteral("-s"), serial, QStringLiteral("shell"), QStringLiteral("ps"),
+                 QStringLiteral("-A")});
+  return parseAdbProcessOutput(fallback);
 }
 
 QString adbVersionText(const QString& executable_path) {
@@ -812,6 +935,95 @@ bool AppEngine::cleanCache() {
   return removed;
 }
 
+QVariantList AppEngine::logcatProcessesForSource(const QUrl& url) const {
+  QVariantList entries;
+  QVariantMap all_entry;
+  all_entry.insert(QStringLiteral("pid"), 0);
+  all_entry.insert(QStringLiteral("name"), QString{});
+  all_entry.insert(QStringLiteral("label"), tr("All processes"));
+  entries.push_back(all_entry);
+
+  const auto canonical = canonicalUrl(url);
+  auto* model = modelForUrl(canonical);
+  if (!model || model->scannerName() != QStringLiteral("Logcat")) {
+    return entries;
+  }
+
+  QSet<int> active_pids;
+  if (auto* source = model->source()) {
+    const auto snapshot = source->snapshot();
+    source->fetchLines(0, static_cast<size_t>(snapshot.line_count),
+                       [&active_pids](SourceLines lines) {
+                         for (const auto& line : lines.lines) {
+                           if (line.pid > 0) {
+                             active_pids.insert(static_cast<int>(line.pid));
+                           }
+                         }
+                       });
+  } else {
+    for (int row = 0; row < model->rowCount(); ++row) {
+      const int pid = model->pidAt(row);
+      if (pid > 0) {
+        active_pids.insert(pid);
+      }
+    }
+  }
+
+  if (active_pids.isEmpty()) {
+    return entries;
+  }
+
+  QHash<int, QString> names;
+  if (const auto adb_spec = StreamSource::parseAdbLogcatSpec(canonical); adb_spec.has_value()) {
+    names = queryAdbProcessesForSerial(adbExecutablePath(), adb_spec->serial);
+  }
+
+  struct ProcessEntry {
+    int pid{};
+    QString name;
+    QString label;
+  };
+
+  std::vector<ProcessEntry> sorted_entries;
+  sorted_entries.reserve(static_cast<size_t>(active_pids.size()));
+  for (const int pid : active_pids) {
+    const auto name = names.value(pid).trimmed();
+    sorted_entries.push_back(ProcessEntry{
+        .pid = pid,
+        .name = name,
+        .label = processLabel(name, pid),
+    });
+  }
+
+  std::sort(sorted_entries.begin(), sorted_entries.end(),
+            [](const ProcessEntry& lhs, const ProcessEntry& rhs) {
+              const bool lhs_named = !lhs.name.isEmpty();
+              const bool rhs_named = !rhs.name.isEmpty();
+              if (lhs_named != rhs_named) {
+                return lhs_named;
+              }
+
+              if (lhs_named) {
+                const int compare = QString::compare(lhs.name, rhs.name, Qt::CaseInsensitive);
+                if (compare != 0) {
+                  return compare < 0;
+                }
+              }
+
+              return lhs.pid < rhs.pid;
+            });
+
+  for (const auto& process : sorted_entries) {
+    QVariantMap entry;
+    entry.insert(QStringLiteral("pid"), process.pid);
+    entry.insert(QStringLiteral("name"), process.name);
+    entry.insert(QStringLiteral("label"), process.label);
+    entries.push_back(entry);
+  }
+
+  return entries;
+}
+
 bool AppEngine::wrapLogLinesForSource(const QUrl& url) const {
   bool found = false;
   const bool saved_value = savedLogSourceWrapLogLines(url, &found);
@@ -881,8 +1093,10 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
   } else if (StreamSource::isSupportedUrl(canonical)) {
     LOG_INFO << "Creating stream-backed log model for '" << canonical.toString().toStdString() << "'";
     auto source = std::make_unique<StreamSource>();
-    if (const auto saved_scanner_name = savedLogSourceScannerName(canonical);
-        !saved_scanner_name.isEmpty()) {
+    if (canonical.scheme() == QStringLiteral("adb")) {
+      source->setRequestedScannerName("Logcat");
+    } else if (const auto saved_scanner_name = savedLogSourceScannerName(canonical);
+               !saved_scanner_name.isEmpty()) {
       source->setRequestedScannerName(saved_scanner_name.toStdString());
     } else {
       source->setRequestedScannerName(UiSettings::instance().defaultLogScannerName().toStdString());

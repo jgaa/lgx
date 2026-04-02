@@ -57,7 +57,9 @@ class LogModel final : public QAbstractListModel {
     MessageRole,
     DateRole,
     TagsRole,
-    ThreadIdRole
+    ThreadIdRole,
+    PidRole,
+    TidRole
   };
   Q_ENUM(Role)
 
@@ -71,6 +73,8 @@ class LogModel final : public QAbstractListModel {
   Q_INVOKABLE int sourceRowAt(int row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
   Q_INVOKABLE int logLevelAt(int row) const;
+  Q_INVOKABLE int pidAt(int row) const;
+  Q_INVOKABLE int tidAt(int row) const;
   Q_INVOKABLE bool markedAt(int row) const;
   Q_INVOKABLE int markColorAt(int row) const;
   Q_INVOKABLE int nextLineOfLevel(int row, int logLevel) const;

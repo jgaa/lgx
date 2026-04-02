@@ -8,6 +8,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QUrl>
+#include <QVariantList>
 
 #include "LogModel.h"
 #include "OpenLogsModel.h"
@@ -137,6 +138,7 @@ class AppEngine : public QObject {
   Q_INVOKABLE void logUiTrace(const QString& message) const;
   Q_INVOKABLE int activeLineMarkColor() const noexcept;
   Q_INVOKABLE bool cleanCache();
+  Q_INVOKABLE QVariantList logcatProcessesForSource(const QUrl& url) const;
   Q_INVOKABLE bool wrapLogLinesForSource(const QUrl& url) const;
   Q_INVOKABLE void saveWrapLogLinesForSource(const QUrl& url, bool enabled) const;
 

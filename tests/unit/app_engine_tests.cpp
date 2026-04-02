@@ -9,6 +9,7 @@
 
 #include "AppEngine.h"
 #include "FileSource.h"
+#include "StreamSource.h"
 #include "UiSettings.h"
 
 namespace lgx {
@@ -68,6 +69,8 @@ TEST(AppEngineTests, LogModelExposesRequestedRoles) {
 
   LogRow row;
   row.line_no = 42;
+  row.pid = 1234;
+  row.tid = 5678;
   row.function_name = QStringLiteral("worker");
   row.log_level = LogLevel_Debug;
   row.raw_message = QStringLiteral("[debug] raw");
@@ -84,6 +87,8 @@ TEST(AppEngineTests, LogModelExposesRequestedRoles) {
   EXPECT_EQ(model.data(index, LogModel::LineNoRole).toLongLong(), 42);
   EXPECT_EQ(model.data(index, LogModel::FunctionNameRole).toString(), QStringLiteral("worker"));
   EXPECT_EQ(model.data(index, LogModel::LogLevelRole).toInt(), static_cast<int>(LogLevel_Debug));
+  EXPECT_EQ(model.data(index, LogModel::PidRole).toInt(), 1234);
+  EXPECT_EQ(model.data(index, LogModel::TidRole).toInt(), 5678);
   EXPECT_EQ(model.data(index, LogModel::RawMessageRole).toString(), QStringLiteral("[debug] raw"));
   EXPECT_EQ(model.data(index, LogModel::MessageRole).toString(), QStringLiteral("formatted"));
   EXPECT_EQ(model.data(index, LogModel::DateRole).toDateTime(), row.date);
@@ -94,6 +99,8 @@ TEST(AppEngineTests, LogModelExposesRequestedRoles) {
   EXPECT_EQ(roles.value(LogModel::LineNoRole), QByteArray("lineNo"));
   EXPECT_EQ(roles.value(LogModel::FunctionNameRole), QByteArray("functionName"));
   EXPECT_EQ(roles.value(LogModel::LogLevelRole), QByteArray("logLevel"));
+  EXPECT_EQ(roles.value(LogModel::PidRole), QByteArray("pid"));
+  EXPECT_EQ(roles.value(LogModel::TidRole), QByteArray("tid"));
   EXPECT_EQ(roles.value(LogModel::RawMessageRole), QByteArray("rawMessage"));
   EXPECT_EQ(roles.value(LogModel::MessageRole), QByteArray("message"));
   EXPECT_EQ(roles.value(LogModel::DateRole), QByteArray("date"));
@@ -245,6 +252,7 @@ TEST(AppEngineTests, AppliesConfiguredDefaultWrapToNewSourcesWithoutMetadata) {
 
 TEST(AppEngineTests, UsesGenericAsBuiltInDefaultScanner) {
   ScopedTestSettings scoped_settings;
+  UiSettings::instance().setDefaultLogScannerName(QStringLiteral("Generic"));
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
   const auto path = dir.filePath(QStringLiteral("generic-default.log"));
@@ -260,6 +268,46 @@ TEST(AppEngineTests, UsesGenericAsBuiltInDefaultScanner) {
   EXPECT_EQ(model->requestedScannerName(), QStringLiteral("Generic"));
   EXPECT_EQ(model->scannerName(), QStringLiteral("Generic"));
   engine.releaseLogModel(QUrl::fromLocalFile(path));
+}
+
+TEST(AppEngineTests, ListsDistinctLogcatProcessesForCurrentSource) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("logcat.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("04-02 16:12:43.821  1111  2222 I ActivityManager: booted\n"
+                       "04-02 16:12:44.001  3333  4444 W MyApp: warning\n"
+                       "04-02 16:12:44.101  1111  5555 D ActivityManager: again\n"),
+            0);
+  file.close();
+
+  AppEngine engine;
+  const auto url = QUrl::fromLocalFile(path);
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+  ASSERT_NE(model, nullptr);
+  model->setRequestedScannerName(QStringLiteral("Logcat"));
+
+  const auto processes = engine.logcatProcessesForSource(url);
+  ASSERT_GE(processes.size(), 3);
+  EXPECT_EQ(processes.at(0).toMap().value(QStringLiteral("pid")).toInt(), 0);
+  EXPECT_EQ(processes.at(1).toMap().value(QStringLiteral("pid")).toInt(), 1111);
+  EXPECT_EQ(processes.at(2).toMap().value(QStringLiteral("pid")).toInt(), 3333);
+  engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, AppliesLogcatScannerToAdbLogcatSources) {
+  ScopedTestSettings scoped_settings;
+  UiSettings::instance().setDefaultLogScannerName(QStringLiteral("Generic"));
+
+  AppEngine engine;
+  const auto url = StreamSource::makeAdbLogcatUrl(QStringLiteral("ZX1G22B7"), QStringLiteral("Pixel"));
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+  ASSERT_NE(model, nullptr);
+
+  EXPECT_EQ(model->requestedScannerName(), QStringLiteral("Logcat"));
+  engine.releaseLogModel(url);
 }
 
 TEST(AppEngineTests, PersistsSourceWrapSettingAlongsideScannerMetadata) {

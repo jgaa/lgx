@@ -22,6 +22,8 @@ class FilterModel final : public QAbstractListModel {
   Q_PROPERTY(bool autoRefresh READ autoRefresh WRITE setAutoRefresh NOTIFY autoRefreshChanged)
   Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
   Q_PROPERTY(QString regexError READ regexError NOTIFY regexErrorChanged)
+  Q_PROPERTY(QString scannerName READ scannerName NOTIFY scannerNameChanged)
+  Q_PROPERTY(int selectedPid READ selectedPid WRITE setSelectedPid NOTIFY selectedPidChanged)
 
  public:
   enum Role {
@@ -35,7 +37,9 @@ class FilterModel final : public QAbstractListModel {
     MessageRole,
     DateRole,
     TagsRole,
-    ThreadIdRole
+    ThreadIdRole,
+    PidRole,
+    TidRole
   };
   Q_ENUM(Role)
 
@@ -53,11 +57,16 @@ class FilterModel final : public QAbstractListModel {
   [[nodiscard]] bool autoRefresh() const noexcept;
   [[nodiscard]] bool dirty() const noexcept;
   [[nodiscard]] QString regexError() const;
+  [[nodiscard]] QString scannerName() const;
+  [[nodiscard]] int selectedPid() const noexcept;
 
   Q_INVOKABLE QString plainTextAt(int row) const;
   Q_INVOKABLE int sourceRowAt(int row) const;
+  Q_INVOKABLE int proxyRowAtOrAfterSourceRow(int source_row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
   Q_INVOKABLE int logLevelAt(int row) const;
+  Q_INVOKABLE int pidAt(int row) const;
+  Q_INVOKABLE int tidAt(int row) const;
   Q_INVOKABLE bool markedAt(int row) const;
   Q_INVOKABLE int markColorAt(int row) const;
   Q_INVOKABLE bool toggleMarkAt(int row, int preferredColor = static_cast<int>(LineMark_Default));
@@ -70,6 +79,7 @@ class FilterModel final : public QAbstractListModel {
   void setRegex(bool enabled);
   void setCaseInsensitive(bool enabled);
   void setAutoRefresh(bool enabled);
+  void setSelectedPid(int pid);
 
  signals:
   void patternChanged();
@@ -79,6 +89,8 @@ class FilterModel final : public QAbstractListModel {
   void dirtyChanged();
   void regexErrorChanged();
   void levelsChanged();
+  void scannerNameChanged();
+  void selectedPidChanged();
 
  private:
   [[nodiscard]] bool matchesSourceRow(int source_row) const;
@@ -101,6 +113,7 @@ class FilterModel final : public QAbstractListModel {
   bool case_insensitive_{false};
   bool auto_refresh_{true};
   bool dirty_{false};
+  int selected_pid_{0};
 };
 
 }  // namespace lgx

@@ -93,6 +93,7 @@ class StreamSource final : public LogSource {
                                                               LogLevel level) const override;
 
  private:
+  void closeInternal(bool invalidate_pages);
   [[nodiscard]] static std::unique_ptr<IStreamProvider> createProvider(const QUrl& url);
   [[nodiscard]] bool ensureSpoolFile();
   void clearSpoolDirectory();

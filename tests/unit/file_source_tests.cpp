@@ -224,12 +224,13 @@ TEST(FileSourceTests, ResetInvalidatesAllCachedPages) {
                               "alpha\nbeta\n");
 
   FileSource source;
+  source.setRequestedScannerName("None");
   source.open(path.string());
   source.startIndexing();
 
   SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
+  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 1U);
 
   const PageKey page_key{source.sourceId(), 0};
   EXPECT_TRUE(source.sharedPageCache().contains(page_key));
@@ -412,6 +413,26 @@ TEST(FileSourceTests, GenericScannerRecognizesDockerMariadbDualTimestampFormat) 
   ASSERT_EQ(fetched.lines.size(), 2U);
   EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Notice);
   EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Warn);
+}
+
+TEST(FileSourceTests, LogcatScannerPreservesPidAndNumericTid) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "logcat.log",
+      "04-02 16:12:43.821  1234  5678 W MyAppTag: hello from android\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Logcat");
+  source.startIndexing();
+
+  SourceLines fetched;
+  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 1U);
+  EXPECT_EQ(fetched.lines[0].pid, 1234U);
+  EXPECT_EQ(fetched.lines[0].tid, 5678U);
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Warn);
 }
 
 }  // namespace

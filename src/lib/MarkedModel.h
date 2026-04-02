@@ -25,7 +25,9 @@ class MarkedModel final : public QAbstractListModel {
     MessageRole,
     DateRole,
     TagsRole,
-    ThreadIdRole
+    ThreadIdRole,
+    PidRole,
+    TidRole
   };
   Q_ENUM(Role)
 

@@ -24,6 +24,8 @@ struct ParsedLineMetadata {
   uint32_t line_offset{};
   uint32_t line_length{};
   LogLevel log_level{LogLevel_Info};
+  uint32_t pid{};
+  uint32_t tid{};
   ParsedSpan thread_id;
   ParsedSpan function_name;
   ParsedSpan message;
