@@ -787,7 +787,7 @@ class GenericScanner final : public LogFormatScanner {
     if (physical_line.front() == ' ' || physical_line.front() == '\t') {
       return false;
     }
-    return parseGenericTimestampPrefix(physical_line).has_value();
+    return true;
   }
 
   [[nodiscard]] FastScanResult scanLineFast(std::string_view line) const noexcept override {

@@ -375,6 +375,37 @@ TEST(FileSourceTests, GenericScannerTreatsIndentedLinesAsContinuations) {
   EXPECT_EQ(fetched.lines[1].text, "2026-04-01 18:49:13.004 INFO done");
 }
 
+TEST(FileSourceTests, GenericScannerDoesNotMergeUnindentedJournalctlLines) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "generic-journalctl.log",
+      "Hint: You are currently not seeing messages from other users and the system.\n"
+      "Users in groups 'adm', 'systemd-journal', 'wheel' can see all messages.\n"
+      "Pass -q to turn off this notice.\n"
+      "Apr 02 21:31:12 archlinux kdeconnectd[2109]: Cannot find Bluez 5 adapter for device search false\n"
+      "Apr 02 21:31:13 archlinux lgx[390666]: qrc:/qt/qml/lgx/qml/LogLineList.qml:513:17: QML "
+      "QQuickRectangle*: Binding loop detected for property \"width\"\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Generic");
+  source.startIndexing();
+
+  EXPECT_EQ(source.snapshot().line_count, 5U);
+
+  SourceLines fetched;
+  source.fetchLines(0, 5, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 5U);
+  EXPECT_EQ(fetched.lines[0].text,
+            "Hint: You are currently not seeing messages from other users and the system.");
+  EXPECT_EQ(fetched.lines[1].text,
+            "Users in groups 'adm', 'systemd-journal', 'wheel' can see all messages.");
+  EXPECT_EQ(fetched.lines[2].text, "Pass -q to turn off this notice.");
+  EXPECT_NE(fetched.lines[3].text.find("Cannot find Bluez 5 adapter"), std::string::npos);
+  EXPECT_NE(fetched.lines[4].text.find("Binding loop detected"), std::string::npos);
+}
+
 TEST(FileSourceTests, GenericScannerDefaultsToInfoWithoutEarlyLevelMatch) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());

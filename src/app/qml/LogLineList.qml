@@ -498,6 +498,32 @@ Item {
                 }
             }
 
+            ScrollBar.vertical: ScrollBar {
+                id: verticalScrollBar
+                parent: root
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: root.horizontalScrollBarReserve
+                active: true
+                policy: ScrollBar.AlwaysOn
+                width: root.verticalScrollBarReserve
+                z: 20
+            }
+
+            ScrollBar.horizontal: ScrollBar {
+                id: horizontalScrollBar
+                parent: root
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.rightMargin: root.verticalScrollBarReserve
+                anchors.bottom: parent.bottom
+                active: true
+                policy: ScrollBar.AlwaysOn
+                height: root.horizontalScrollBarReserve
+                z: 20
+            }
+
             delegate: Rectangle {
                 id: rowDelegate
                 required property int index
@@ -509,26 +535,27 @@ Item {
                 required property bool marked
                 required property int markColor
                 readonly property int rowFontPixelSize: UiSettings.effectiveLogFontPixelSize
+                readonly property real intrinsicRowWidth: contentRow.implicitWidth + gutter.width + 18
 
                 width: ListView.view
                     ? (root.wrapLogLines
                         ? ListView.view.width
                         : Math.max(ListView.view.width,
                                    root.maxRowWidth,
-                                   contentRow.implicitWidth + gutter.width + 18))
-                    : Math.max(root.maxRowWidth, contentRow.implicitWidth + gutter.width + 18)
+                                   intrinsicRowWidth))
+                    : Math.max(root.maxRowWidth, intrinsicRowWidth)
                 height: Math.max(rowFontPixelSize, contentRow.implicitHeight) + 8
                 color: "transparent"
 
                 Component.onCompleted: {
-                    if (width > root.maxRowWidth) {
-                        root.maxRowWidth = width
+                    if (intrinsicRowWidth > root.maxRowWidth) {
+                        root.maxRowWidth = intrinsicRowWidth
                     }
                 }
 
-                onWidthChanged: {
-                    if (width > root.maxRowWidth) {
-                        root.maxRowWidth = width
+                onIntrinsicRowWidthChanged: {
+                    if (intrinsicRowWidth > root.maxRowWidth) {
+                        root.maxRowWidth = intrinsicRowWidth
                     }
                 }
 
@@ -660,50 +687,6 @@ Item {
 
                     onReleased: root.finishPointerSelection()
                     onCanceled: root.finishPointerSelection()
-                }
-            }
-        }
-
-        ScrollBar {
-            id: verticalScrollBar
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.bottom: horizontalScrollBar.top
-            orientation: Qt.Vertical
-            size: listView.visibleArea.heightRatio
-            position: listView.visibleArea.yPosition
-            active: true
-            width: root.verticalScrollBarReserve
-            z: 20
-            onPositionChanged: {
-                if (pressed) {
-                    const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
-                    const maximumPosition = Math.max(0, 1.0 - size)
-                    listView.contentY = maximumPosition > 0
-                        ? (position / maximumPosition) * maximumContentY
-                        : 0
-                }
-            }
-        }
-
-        ScrollBar {
-            id: horizontalScrollBar
-            anchors.left: parent.left
-            anchors.right: verticalScrollBar.left
-            anchors.bottom: parent.bottom
-            orientation: Qt.Horizontal
-            size: listView.visibleArea.widthRatio
-            position: listView.visibleArea.xPosition
-            active: true
-            height: root.horizontalScrollBarReserve
-            z: 20
-            onPositionChanged: {
-                if (pressed) {
-                    const maximumContentX = Math.max(0, listView.contentWidth - listView.width)
-                    const maximumPosition = Math.max(0, 1.0 - size)
-                    listView.contentX = maximumPosition > 0
-                        ? (position / maximumPosition) * maximumContentX
-                        : 0
                 }
             }
         }
