@@ -415,7 +415,7 @@ ApplicationWindow {
 
             Menu {
                 title: qsTr("Docker")
-                visible: AppEngine.dockerAvailable
+                enabled: AppEngine.dockerAvailable
 
                 MenuItem {
                     text: qsTr("Open Running Containers")
@@ -620,10 +620,8 @@ ApplicationWindow {
             width: parent.width
             spacing: 6
 
-            Label {
-                text: qsTr("Follow")
-                color: "#6c655c"
-                font.bold: true
+            Item {
+                implicitWidth: 6
             }
 
             LgxQml.SymbolToolButton {
@@ -634,23 +632,6 @@ ApplicationWindow {
                 ToolTip.visible: hovered
                 ToolTip.text: checked ? qsTr("Stop following live log") : qsTr("Follow live log")
                 onClicked: window.toggleActiveFollow()
-            }
-
-            Frame {
-                Layout.fillHeight: true
-                padding: 0
-
-                Rectangle {
-                    implicitWidth: 1
-                    implicitHeight: 26
-                    color: "#cfc7bb"
-                }
-            }
-
-            Label {
-                text: qsTr("View")
-                color: "#6c655c"
-                font.bold: true
             }
 
             LgxQml.SymbolToolButton {
@@ -672,12 +653,6 @@ ApplicationWindow {
                     implicitHeight: 26
                     color: "#cfc7bb"
                 }
-            }
-
-            Label {
-                text: qsTr("Navigate")
-                color: "#6c655c"
-                font.bold: true
             }
 
             LgxQml.SymbolToolButton {
@@ -812,7 +787,12 @@ ApplicationWindow {
                                                                  : window.tablerIcon("file-text")))
 
                     padding: 0
+                    width: implicitWidth
                     implicitWidth: tabContent.implicitWidth + 24
+                    leftPadding: 0
+                    rightPadding: 0
+                    topPadding: 0
+                    bottomPadding: 0
                     
                     Component.onCompleted: {
                         if (sourceUrl && sourceUrl.toString().length > 0) {
@@ -845,9 +825,9 @@ ApplicationWindow {
 
                         Label {
                             Layout.alignment: Qt.AlignVCenter
-                            Layout.fillWidth: true
                             text: title
                             elide: Text.ElideRight
+                            color: tabButton.checked ? "#2c2823" : "#5b544d"
                             font.bold: !!tabButton.tabLogModel && tabButton.tabLogModel.active
                         }
 
@@ -857,13 +837,22 @@ ApplicationWindow {
                             implicitHeight: 18
                             symbolPixelSize: 12
                             symbol: "close"
-                            fgColor: "#6c655c"
+                            fgColor: tabButton.checked ? "#5a534c" : "#726a61"
                             bgColor: tabButton.checked ? "#d7d2c9" : "#e8e2d8"
                             focusPolicy: Qt.NoFocus
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Close tab")
                             onClicked: window.closeTabAt(index)
                         }
+                    }
+
+                    background: Rectangle {
+                        radius: 6
+                        color: tabButton.checked
+                            ? "#f4f1ea"
+                            : (tabButton.hovered ? "#ece5da" : "#ddd5c8")
+                        border.width: tabButton.checked ? 1 : 0
+                        border.color: "#bdb3a5"
                     }
                 }
             }
@@ -967,6 +956,9 @@ ApplicationWindow {
 
             LgxQml.SymbolToolButton {
                 enabled: sourceField.text.length > 0
+                implicitWidth: 24
+                implicitHeight: 24
+                symbolPixelSize: 14
                 symbol: "content_copy"
                 fgColor: "#2c2823"
                 bgColor: "#e2ddd3"

@@ -47,6 +47,27 @@ target_link_libraries(lgx_app
     Qt6::Quick
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  get_target_property(LGX_QT_CORE_TARGET_TYPE Qt6::Core TYPE)
+  if(LGX_QT_CORE_TARGET_TYPE STREQUAL "STATIC_LIBRARY")
+    set(LGX_QT_PLATFORM_PLUGINS)
+
+    if(TARGET Qt6::QXcbIntegrationPlugin)
+      list(APPEND LGX_QT_PLATFORM_PLUGINS Qt6::QXcbIntegrationPlugin)
+    endif()
+
+    if(TARGET Qt6::QWaylandIntegrationPlugin)
+      list(APPEND LGX_QT_PLATFORM_PLUGINS Qt6::QWaylandIntegrationPlugin)
+    endif()
+
+    if(LGX_QT_PLATFORM_PLUGINS)
+      qt_import_plugins(lgx_app INCLUDE ${LGX_QT_PLATFORM_PLUGINS})
+    else()
+      message(WARNING "Static Qt build detected, but no Linux Qt platform integration plugins were found.")
+    endif()
+  endif()
+endif()
+
 set_target_properties(lgx_app PROPERTIES
   OUTPUT_NAME lgx
 )

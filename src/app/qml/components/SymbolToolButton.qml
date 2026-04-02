@@ -10,10 +10,11 @@ ToolButton {
     property url iconSource: ""
     property string symbol: "help"
     property string accessibleName: ""
-    property int symbolPixelSize: 20
+    property int symbolPixelSize: 18
+    readonly property int effectiveSymbolPixelSize: Math.max(12, Math.min(symbolPixelSize, Math.min(width, height) - 10))
 
-    implicitWidth: 34
-    implicitHeight: 34
+    implicitWidth: 30
+    implicitHeight: 30
     padding: 0
     hoverEnabled: true
 
@@ -24,10 +25,10 @@ ToolButton {
             anchors.centerIn: parent
             visible: root.iconSource.toString().length > 0
             source: root.iconSource
-            width: root.symbolPixelSize
-            height: root.symbolPixelSize
-            sourceSize.width: root.symbolPixelSize
-            sourceSize.height: root.symbolPixelSize
+            width: root.effectiveSymbolPixelSize
+            height: root.effectiveSymbolPixelSize
+            sourceSize.width: root.effectiveSymbolPixelSize
+            sourceSize.height: root.effectiveSymbolPixelSize
             fillMode: Image.PreserveAspectFit
             smooth: true
             mipmap: true
@@ -41,7 +42,7 @@ ToolButton {
             verticalAlignment: Text.AlignVCenter
             text: root.symbol
             font.family: "Material Symbols Outlined"
-            font.pixelSize: root.symbolPixelSize
+            font.pixelSize: root.effectiveSymbolPixelSize
             color: root.enabled ? root.fgColor : Qt.rgba(root.fgColor.r, root.fgColor.g, root.fgColor.b, 0.45)
         }
     }

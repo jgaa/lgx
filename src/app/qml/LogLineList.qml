@@ -23,6 +23,8 @@ Item {
     property string popupLineText: ""
     property real maxRowWidth: 0
     readonly property bool hasSelection: selectedIndexes.length > 0
+    readonly property real verticalScrollBarReserve: 14
+    readonly property real horizontalScrollBarReserve: 16
     readonly property string selectedText: selectedIndexes
         .map(function(index) {
             const row = selectedRowsByIndex[index]
@@ -456,18 +458,25 @@ Item {
         anchors.fill: parent
         padding: 0
 
+        Rectangle {
+            anchors.fill: parent
+            color: "#f6f3ee"
+        }
+
         ListView {
             id: listView
             anchors.fill: parent
+            anchors.rightMargin: root.verticalScrollBarReserve
+            anchors.bottomMargin: root.horizontalScrollBarReserve
             clip: true
             model: root.rowModel
             boundsBehavior: Flickable.StopAtBounds
             interactive: !root.pointerSelectionActive
-            rightMargin: verticalScrollBar.width
+            rightMargin: 8
             contentWidth: root.wrapLogLines ? width : Math.max(width, root.maxRowWidth)
             footer: Item {
                 width: listView.width
-                height: horizontalScrollBar.height
+                height: 0
             }
             onContentYChanged: root.updateTopVisibleIndex()
             onCountChanged: {
@@ -489,16 +498,6 @@ Item {
                 }
             }
 
-            ScrollBar.vertical: ScrollBar {
-                id: verticalScrollBar
-                policy: ScrollBar.AlwaysOn
-            }
-
-            ScrollBar.horizontal: ScrollBar {
-                id: horizontalScrollBar
-                policy: ScrollBar.AlwaysOn
-            }
-
             delegate: Rectangle {
                 id: rowDelegate
                 required property int index
@@ -513,11 +512,13 @@ Item {
 
                 width: ListView.view
                     ? (root.wrapLogLines
-                        ? ListView.view.width - ListView.view.rightMargin
-                        : Math.max(ListView.view.width - ListView.view.rightMargin, contentRow.implicitWidth + gutter.width + 18))
-                    : contentRow.implicitWidth + gutter.width + 18
+                        ? ListView.view.width
+                        : Math.max(ListView.view.width,
+                                   root.maxRowWidth,
+                                   contentRow.implicitWidth + gutter.width + 18))
+                    : Math.max(root.maxRowWidth, contentRow.implicitWidth + gutter.width + 18)
                 height: Math.max(rowFontPixelSize, contentRow.implicitHeight) + 8
-                color: root.isIndexSelected(index) ? "#d7e6f5" : root.rowBackgroundColor(index, logLevel)
+                color: "transparent"
 
                 Component.onCompleted: {
                     if (width > root.maxRowWidth) {
@@ -529,6 +530,12 @@ Item {
                     if (width > root.maxRowWidth) {
                         root.maxRowWidth = width
                     }
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: root.isIndexSelected(index) ? "#d7e6f5" : root.rowBackgroundColor(index, logLevel)
+                    z: -1
                 }
 
                 Rectangle {
@@ -559,6 +566,7 @@ Item {
                     id: contentArea
                     anchors.fill: parent
                     anchors.leftMargin: gutter.width
+                    clip: true
 
                     Row {
                         id: contentRow
@@ -582,6 +590,8 @@ Item {
                                 ? Math.max(0, contentArea.width - lineNumberLabel.implicitWidth - contentRow.spacing - 12)
                                 : implicitWidth
                             wrapMode: root.wrapLogLines ? Text.WrapAtWordBoundaryOrAnywhere : Text.NoWrap
+                            elide: root.wrapLogLines ? Text.ElideNone : Text.ElideLeft
+                            clip: true
                             font.family: UiSettings.logFontFamily
                             font.pixelSize: rowFontPixelSize
                             color: root.levelForegroundColor(logLevel)
@@ -652,6 +662,59 @@ Item {
                     onCanceled: root.finishPointerSelection()
                 }
             }
+        }
+
+        ScrollBar {
+            id: verticalScrollBar
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.bottom: horizontalScrollBar.top
+            orientation: Qt.Vertical
+            size: listView.visibleArea.heightRatio
+            position: listView.visibleArea.yPosition
+            active: true
+            width: root.verticalScrollBarReserve
+            z: 20
+            onPositionChanged: {
+                if (pressed) {
+                    const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
+                    const maximumPosition = Math.max(0, 1.0 - size)
+                    listView.contentY = maximumPosition > 0
+                        ? (position / maximumPosition) * maximumContentY
+                        : 0
+                }
+            }
+        }
+
+        ScrollBar {
+            id: horizontalScrollBar
+            anchors.left: parent.left
+            anchors.right: verticalScrollBar.left
+            anchors.bottom: parent.bottom
+            orientation: Qt.Horizontal
+            size: listView.visibleArea.widthRatio
+            position: listView.visibleArea.xPosition
+            active: true
+            height: root.horizontalScrollBarReserve
+            z: 20
+            onPositionChanged: {
+                if (pressed) {
+                    const maximumContentX = Math.max(0, listView.contentWidth - listView.width)
+                    const maximumPosition = Math.max(0, 1.0 - size)
+                    listView.contentX = maximumPosition > 0
+                        ? (position / maximumPosition) * maximumContentX
+                        : 0
+                }
+            }
+        }
+
+        Rectangle {
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            width: root.verticalScrollBarReserve
+            height: root.horizontalScrollBarReserve
+            color: "#f6f3ee"
+            z: 19
         }
     }
 
