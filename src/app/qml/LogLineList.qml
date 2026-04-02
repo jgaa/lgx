@@ -39,6 +39,7 @@ Item {
     signal rowClicked(int proxyRow, int sourceRow)
     signal activated()
     signal pageScrollRequested(int deltaPages)
+    signal zoomWheelRequested(int steps)
 
     function normalizeIndex(index) {
         return Math.max(0, Math.min(index, listView.count - 1))
@@ -293,6 +294,29 @@ Item {
         const targetIndex = normalizeIndex(topVisibleIndex + deltaRows)
         listView.positionViewAtIndex(targetIndex, ListView.Beginning)
         updateTopVisibleIndex()
+    }
+
+    function scrollByWheelEvent(wheel) {
+        const pixelDeltaY = wheel.pixelDelta.y
+        if (pixelDeltaY !== 0) {
+            const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
+            if (maximumContentY <= 0) {
+                return
+            }
+
+            listView.contentY = Math.max(0, Math.min(maximumContentY, listView.contentY - pixelDeltaY))
+            updateTopVisibleIndex()
+            return
+        }
+
+        const angleDeltaY = wheel.angleDelta.y
+        if (angleDeltaY === 0) {
+            return
+        }
+
+        const notchCount = angleDeltaY / 120.0
+        const rowsPerNotch = 3
+        scrollByRows(-Math.round(notchCount * rowsPerNotch))
     }
 
     function selectSingleRow(index, positionMode) {
@@ -688,6 +712,29 @@ Item {
                     onReleased: root.finishPointerSelection()
                     onCanceled: root.finishPointerSelection()
                 }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            anchors.rightMargin: root.verticalScrollBarReserve
+            anchors.bottomMargin: root.horizontalScrollBarReserve
+            acceptedButtons: Qt.NoButton
+            propagateComposedEvents: false
+            z: 5
+
+            onWheel: function(wheel) {
+                if ((wheel.modifiers & Qt.ControlModifier) !== 0) {
+                    const deltaY = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.pixelDelta.y
+                    if (deltaY !== 0) {
+                        root.zoomWheelRequested(deltaY > 0 ? 1 : -1)
+                    }
+                    wheel.accepted = true
+                    return
+                }
+
+                root.scrollByWheelEvent(wheel)
+                wheel.accepted = true
             }
         }
 

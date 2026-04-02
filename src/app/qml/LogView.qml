@@ -297,20 +297,6 @@ Item {
         color: "#d3d7dd"
     }
 
-    WheelHandler {
-        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-        acceptedModifiers: Qt.ControlModifier
-
-        onWheel: function(event) {
-            if (event.angleDelta.y === 0) {
-                return
-            }
-
-            UiSettings.stepLogZoom(event.angleDelta.y > 0 ? 1 : -1)
-            event.accepted = true
-        }
-    }
-
     Timer {
         interval: Math.max(1, root.followScrollIntervalMs)
         repeat: true
@@ -327,6 +313,7 @@ Item {
         followMode: root.following
         emptyText: qsTr("Log is open, but no rows are loaded yet.")
         onActivated: root.activateView()
+        onZoomWheelRequested: UiSettings.stepLogZoom(steps)
     }
 
     SymbolToolButton {
