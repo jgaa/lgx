@@ -273,6 +273,18 @@ Item {
         })
     }
 
+    function scrollHorizontally(deltaPixels) {
+        lineList.scrollHorizontally(deltaPixels)
+    }
+
+    function scrollToLineStart() {
+        lineList.scrollToLineStart()
+    }
+
+    function scrollToSelectedLineEnd() {
+        lineList.scrollToSelectedLineEnd()
+    }
+
     onSourceUrlChanged: acquireLogModel()
     onWorkspaceChanged: registerWithWorkspace()
     onFollowingChanged: ensureFollowingAtEnd()
@@ -314,6 +326,16 @@ Item {
         emptyText: qsTr("Log is open, but no rows are loaded yet.")
         onActivated: root.activateView()
         onZoomWheelRequested: UiSettings.stepLogZoom(steps)
+        onBackwardWheelScrollRequested: {
+            if (root.following) {
+                root.setFollowing(false)
+            }
+        }
+        onUpwardScrollBarNavigationRequested: {
+            if (root.following) {
+                root.setFollowing(false)
+            }
+        }
     }
 
     SymbolToolButton {
@@ -361,6 +383,30 @@ Item {
         sequences: ["PgDown"]
         enabled: root.activeFocus
         onActivated: root.scrollByPages(1)
+    }
+
+    Shortcut {
+        sequences: ["Left"]
+        enabled: root.activeFocus
+        onActivated: root.scrollHorizontally(-80)
+    }
+
+    Shortcut {
+        sequences: ["Right"]
+        enabled: root.activeFocus
+        onActivated: root.scrollHorizontally(80)
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+Left"]
+        enabled: root.activeFocus
+        onActivated: root.scrollToLineStart()
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+Right"]
+        enabled: root.activeFocus
+        onActivated: root.scrollToSelectedLineEnd()
     }
 
     Menu {

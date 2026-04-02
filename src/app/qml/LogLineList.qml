@@ -22,6 +22,7 @@ Item {
     property int popupLineIndex: -1
     property string popupLineText: ""
     property real maxRowWidth: 0
+    property real lastVerticalScrollBarPosition: 0
     readonly property bool hasSelection: selectedIndexes.length > 0
     readonly property real verticalScrollBarReserve: 14
     readonly property real horizontalScrollBarReserve: 16
@@ -40,13 +41,47 @@ Item {
     signal activated()
     signal pageScrollRequested(int deltaPages)
     signal zoomWheelRequested(int steps)
+    signal backwardWheelScrollRequested()
+    signal upwardScrollBarNavigationRequested()
+
+    TextMetrics {
+        id: horizontalMeasure
+        font.family: UiSettings.logFontFamily
+        font.pixelSize: UiSettings.effectiveLogFontPixelSize
+    }
 
     function normalizeIndex(index) {
         return Math.max(0, Math.min(index, listView.count - 1))
     }
 
+    function maximumContentX() {
+        return Math.max(0, listView.contentWidth - listView.width)
+    }
+
+    function selectedAnchorIndex() {
+        if (selectedIndexes.length > 0) {
+            return selectedIndexes[selectedIndexes.length - 1]
+        }
+
+        return topVisibleIndex
+    }
+
     function rowText(message, rawMessage) {
         return message.length > 0 ? message : rawMessage
+    }
+
+    function measuredRowWidth(index) {
+        if (!rowModel || index < 0 || index >= listView.count) {
+            return 0
+        }
+
+        const messageText = rowModel.plainTextAt(index)
+        const lineNumberText = String(rowModel.lineNoAt(index))
+        horizontalMeasure.text = lineNumberText
+        const lineNumberWidth = horizontalMeasure.advanceWidth
+        horizontalMeasure.text = messageText
+        const messageWidth = horizontalMeasure.advanceWidth
+        return UiSettings.effectiveLogFontPixelSize + 4 + lineNumberWidth + 8 + messageWidth + 18
     }
 
     function levelForegroundColor(logLevel) {
@@ -296,9 +331,39 @@ Item {
         updateTopVisibleIndex()
     }
 
+    function scrollHorizontally(deltaPixels) {
+        if (wrapLogLines || deltaPixels === 0) {
+            return
+        }
+
+        listView.contentX = Math.max(0, Math.min(maximumContentX(), listView.contentX + deltaPixels))
+    }
+
+    function scrollToLineStart() {
+        if (wrapLogLines) {
+            return
+        }
+
+        listView.contentX = 0
+    }
+
+    function scrollToSelectedLineEnd() {
+        if (wrapLogLines) {
+            return
+        }
+
+        const anchorIndex = selectedAnchorIndex()
+        const rowWidth = measuredRowWidth(anchorIndex)
+        const targetContentX = Math.max(0, rowWidth - listView.width)
+        listView.contentX = Math.max(0, Math.min(maximumContentX(), targetContentX))
+    }
+
     function scrollByWheelEvent(wheel) {
         const pixelDeltaY = wheel.pixelDelta.y
         if (pixelDeltaY !== 0) {
+            if (pixelDeltaY > 0) {
+                root.backwardWheelScrollRequested()
+            }
             const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
             if (maximumContentY <= 0) {
                 return
@@ -312,6 +377,10 @@ Item {
         const angleDeltaY = wheel.angleDelta.y
         if (angleDeltaY === 0) {
             return
+        }
+
+        if (angleDeltaY > 0) {
+            root.backwardWheelScrollRequested()
         }
 
         const notchCount = angleDeltaY / 120.0
@@ -380,18 +449,27 @@ Item {
     Menu {
         id: lineContextMenu
 
-        Menu {
-            title: qsTr("Copy")
-            MenuItem {
-                text: qsTr("Selection")
-                enabled: root.hasSelection
-                onTriggered: root.copySelectionToClipboard()
-            }
+        MenuItem {
+            text: qsTr("Copy Line")
+            enabled: root.contextMenuLineIndex >= 0
+            onTriggered: root.copyLineToClipboard(root.contextMenuLineIndex)
+        }
 
-            MenuItem {
-                text: qsTr("Line")
-                enabled: root.contextMenuLineIndex >= 0
-                onTriggered: root.copyLineToClipboard(root.contextMenuLineIndex)
+        MenuItem {
+            text: qsTr("Copy Selection")
+            enabled: root.hasSelection
+            onTriggered: root.copySelectionToClipboard()
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: qsTr("Show")
+            enabled: root.contextMenuLineIndex >= 0
+            onTriggered: {
+                const point = Qt.point(Math.round((root.width - linePopup.width) / 2),
+                                       Math.round((root.height - linePopup.height) / 2))
+                root.openLinePopup(root.contextMenuLineIndex, root.contextMenuLineText, point)
             }
         }
     }
@@ -533,6 +611,19 @@ Item {
                 policy: ScrollBar.AlwaysOn
                 width: root.verticalScrollBarReserve
                 z: 20
+
+                onPressedChanged: {
+                    if (pressed) {
+                        root.lastVerticalScrollBarPosition = position
+                    }
+                }
+
+                onPositionChanged: {
+                    if (pressed && position < root.lastVerticalScrollBarPosition - 0.0001) {
+                        root.upwardScrollBarNavigationRequested()
+                    }
+                    root.lastVerticalScrollBarPosition = position
+                }
             }
 
             ScrollBar.horizontal: ScrollBar {
