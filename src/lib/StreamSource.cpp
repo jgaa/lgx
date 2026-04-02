@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QUuid>
 #include <QUrlQuery>
 
@@ -17,6 +19,25 @@ constexpr auto kPipeScheme = "pipe";
 constexpr auto kDockerScheme = "docker";
 constexpr auto kAdbScheme = "adb";
 constexpr auto kSpoolFileName = "stream.log";
+constexpr auto kAppCacheRootName = "lgx";
+constexpr auto kSpoolDirName = "spool";
+
+QString streamSpoolTemplate() {
+  QString cache_root = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+  if (cache_root.isEmpty()) {
+    cache_root = QDir::tempPath();
+  }
+
+  QDir cache_dir(cache_root);
+  const QString spool_root = QStringLiteral("%1/%2")
+                                 .arg(QLatin1StringView{kAppCacheRootName},
+                                      QLatin1StringView{kSpoolDirName});
+  if (!cache_dir.mkpath(spool_root)) {
+    return {};
+  }
+
+  return cache_dir.filePath(spool_root + QStringLiteral("/stream-XXXXXX"));
+}
 
 bool queryFlagValue(const QUrlQuery& query, QStringView key, bool default_value) {
   const auto value = query.queryItemValue(key.toString());
@@ -459,6 +480,7 @@ void StreamSource::close() {
     spool_file_.close();
   }
   spool_path_.clear();
+  clearSpoolDirectory();
 }
 
 void StreamSource::startIndexing() {
@@ -549,12 +571,24 @@ std::unique_ptr<IStreamProvider> StreamSource::createProvider(const QUrl& url) {
 }
 
 bool StreamSource::ensureSpoolFile() {
-  if (!spool_dir_.isValid()) {
-    fail(QObject::tr("Failed to create temporary directory for stream spool"));
-    return false;
+  if (!spool_dir_) {
+    const auto spool_template = streamSpoolTemplate();
+    if (spool_template.isEmpty()) {
+      fail(QObject::tr("Failed to prepare cache directory for stream spool"));
+      return false;
+    }
+
+    auto spool_dir = std::make_unique<QTemporaryDir>(spool_template);
+    spool_dir->setAutoRemove(true);
+    if (!spool_dir->isValid()) {
+      fail(QObject::tr("Failed to create temporary directory for stream spool"));
+      return false;
+    }
+
+    spool_dir_ = std::move(spool_dir);
   }
 
-  spool_path_ = QDir(spool_dir_.path()).filePath(QLatin1StringView{kSpoolFileName});
+  spool_path_ = QDir(spool_dir_->path()).filePath(QLatin1StringView{kSpoolFileName});
   spool_file_.setFileName(spool_path_);
   if (!spool_file_.open(QIODevice::WriteOnly | QIODevice::Append)) {
     fail(QObject::tr("Failed to open stream spool file: %1").arg(spool_path_));
@@ -605,6 +639,15 @@ void StreamSource::flushPendingBytes() {
   spool_file_.flush();
   pending_bytes_.clear();
   spool_source_.refresh();
+}
+
+void StreamSource::clearSpoolDirectory() {
+  if (!spool_dir_) {
+    return;
+  }
+
+  spool_dir_->remove();
+  spool_dir_.reset();
 }
 
 void StreamSource::fail(QString message) {

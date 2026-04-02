@@ -3,11 +3,13 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUuid>
 
 #include "AppEngine.h"
 #include "FileSource.h"
+#include "UiSettings.h"
 
 namespace lgx {
 namespace {
@@ -16,6 +18,7 @@ class ScopedTestSettings {
  public:
   ScopedTestSettings()
       : temp_dir_() {
+    QStandardPaths::setTestModeEnabled(true);
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temp_dir_.path());
     QCoreApplication::setOrganizationName(QStringLiteral("lgx-tests"));
@@ -202,6 +205,141 @@ TEST(AppEngineTests, PersistsSourceFormatMetadataAndReappliesIt) {
   auto* restored_model = qobject_cast<LogModel*>(restored_engine.createLogModel(url));
   ASSERT_NE(restored_model, nullptr);
   EXPECT_EQ(restored_model->requestedScannerName(), QStringLiteral("Logfault"));
+  restored_engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, AppliesConfiguredDefaultScannerToNewSourcesWithoutMetadata) {
+  ScopedTestSettings scoped_settings;
+  UiSettings::instance().setDefaultLogScannerName(QStringLiteral("Logfault"));
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("default-format.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("2026-03-31 10:15:00.123 host INFO 42 {worker} hello\n"), 0);
+  file.close();
+
+  AppEngine engine;
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(QUrl::fromLocalFile(path)));
+  ASSERT_NE(model, nullptr);
+  EXPECT_EQ(model->requestedScannerName(), QStringLiteral("Logfault"));
+  EXPECT_EQ(model->scannerName(), QStringLiteral("Logfault"));
+  engine.releaseLogModel(QUrl::fromLocalFile(path));
+}
+
+TEST(AppEngineTests, AppliesConfiguredDefaultWrapToNewSourcesWithoutMetadata) {
+  ScopedTestSettings scoped_settings;
+  UiSettings::instance().setWrapLogLinesByDefault(true);
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("default-wrap.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("2026-03-31 10:15:00.123 INFO hello\n"), 0);
+  file.close();
+
+  AppEngine engine;
+  const auto url = QUrl::fromLocalFile(path);
+  EXPECT_TRUE(engine.wrapLogLinesForSource(url));
+}
+
+TEST(AppEngineTests, UsesGenericAsBuiltInDefaultScanner) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("generic-default.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("2026-03-31 10:15:00.123 INFO hello\n continuation\n"), 0);
+  file.close();
+
+  AppEngine engine;
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(QUrl::fromLocalFile(path)));
+  ASSERT_NE(model, nullptr);
+  EXPECT_EQ(UiSettings::instance().defaultLogScannerName(), QStringLiteral("Generic"));
+  EXPECT_EQ(model->requestedScannerName(), QStringLiteral("Generic"));
+  EXPECT_EQ(model->scannerName(), QStringLiteral("Generic"));
+  engine.releaseLogModel(QUrl::fromLocalFile(path));
+}
+
+TEST(AppEngineTests, PersistsSourceWrapSettingAlongsideScannerMetadata) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("persist-wrap.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("2026-03-31 10:15:00.123 INFO hello\n"), 0);
+  file.close();
+
+  const auto url = QUrl::fromLocalFile(path);
+
+  {
+    AppEngine engine;
+    auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+    ASSERT_NE(model, nullptr);
+    model->setRequestedScannerName(QStringLiteral("Logfault"));
+    engine.saveWrapLogLinesForSource(url, true);
+    engine.releaseLogModel(url);
+  }
+
+  AppEngine restored_engine;
+  auto* restored_model = qobject_cast<LogModel*>(restored_engine.createLogModel(url));
+  ASSERT_NE(restored_model, nullptr);
+  EXPECT_EQ(restored_model->requestedScannerName(), QStringLiteral("Logfault"));
+  EXPECT_TRUE(restored_engine.wrapLogLinesForSource(url));
+  restored_engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, OpenStreamCountTracksOpenStreamTabs) {
+  ScopedTestSettings scoped_settings;
+  AppEngine engine;
+
+  EXPECT_EQ(engine.openStreamCount(), 0);
+  EXPECT_GE(engine.openPipeStream(QStringLiteral("printf 'hello\\n'"), true, false, false), 0);
+  EXPECT_EQ(engine.openStreamCount(), 1);
+  EXPECT_GE(engine.openLogSource(QUrl(QStringLiteral("file:///tmp/plain.log"))), 0);
+  EXPECT_EQ(engine.openStreamCount(), 1);
+  EXPECT_TRUE(engine.closeOpenLogAt(0));
+  EXPECT_EQ(engine.openStreamCount(), 0);
+}
+
+TEST(AppEngineTests, CleanCacheIsBlockedWhileStreamTabsAreOpen) {
+  ScopedTestSettings scoped_settings;
+  AppEngine engine;
+
+  EXPECT_GE(engine.openPipeStream(QStringLiteral("printf 'hello\\n'"), true, false, false), 0);
+  EXPECT_FALSE(engine.cleanCache());
+
+  EXPECT_TRUE(engine.closeOpenLogAt(0));
+  EXPECT_TRUE(engine.cleanCache());
+}
+
+TEST(AppEngineTests, SavedSourceScannerOverridesConfiguredDefaultScanner) {
+  ScopedTestSettings scoped_settings;
+  UiSettings::instance().setDefaultLogScannerName(QStringLiteral("Logcat"));
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("saved-format.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("2026-03-31 10:15:00.123 host INFO 42 {worker} hello\n"), 0);
+  file.close();
+
+  const auto url = QUrl::fromLocalFile(path);
+  {
+    AppEngine engine;
+    auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+    ASSERT_NE(model, nullptr);
+    model->setRequestedScannerName(QStringLiteral("Logfault"));
+    engine.releaseLogModel(url);
+  }
+
+  AppEngine restored_engine;
+  auto* restored_model = qobject_cast<LogModel*>(restored_engine.createLogModel(url));
+  ASSERT_NE(restored_model, nullptr);
+  EXPECT_EQ(restored_model->requestedScannerName(), QStringLiteral("Logfault"));
+  EXPECT_EQ(restored_model->scannerName(), QStringLiteral("Logfault"));
   restored_engine.releaseLogModel(url);
 }
 

@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 
+#include "LogScanner.h"
+
 namespace lgx {
 namespace {
 
@@ -14,8 +16,10 @@ constexpr auto kLogFontFamilyKey = "ui/log/fontFamily";
 constexpr auto kLogBaseFontPixelSizeKey = "ui/log/baseFontPixelSize";
 constexpr auto kLogZoomPercentKey = "ui/log/zoomPercent";
 constexpr auto kFollowLiveLogsByDefaultKey = "ui/log/followLiveLogsByDefault";
+constexpr auto kWrapLogLinesByDefaultKey = "ui/log/wrapLogLinesByDefault";
 constexpr auto kFollowScrollIntervalMsKey = "ui/log/followScrollIntervalMs";
 constexpr auto kFollowHighRateScrollIntervalMsKey = "ui/log/followHighRateScrollIntervalMs";
+constexpr auto kDefaultLogScannerNameKey = "ui/log/defaultScannerName";
 constexpr auto kAdbExecutablePathKey = "ui/adb/executablePath";
 constexpr int kDefaultLogBaseFontPixelSize = 13;
 constexpr int kMinLogBaseFontPixelSize = 8;
@@ -44,12 +48,12 @@ struct LogLevelStyleDefinition {
 };
 
 constexpr std::array kLogLevelStyleDefinitions{
-    LogLevelStyleDefinition{LogLevel_Error, "error", "Error", "#b22222", "#fff3a6"},
-    LogLevelStyleDefinition{LogLevel_Warn, "warning", "Warning", "#d97706", "#ffffff"},
-    LogLevelStyleDefinition{LogLevel_Notice, "notice", "Notice", "#1e3a5f", "#ffffff"},
-    LogLevelStyleDefinition{LogLevel_Info, "info", "Info", "#1e3a5f", "#ffffff"},
-    LogLevelStyleDefinition{LogLevel_Debug, "debug", "Debug", "#0f766e", "#ffffff"},
-    LogLevelStyleDefinition{LogLevel_Trace, "trace", "Trace", "#6b7280", "#ffffff"},
+    LogLevelStyleDefinition{LogLevel_Error, "error", "Error", "red", "yellow"},
+    LogLevelStyleDefinition{LogLevel_Warn, "warning", "Warning", "orangered", "white"},
+    LogLevelStyleDefinition{LogLevel_Notice, "notice", "Notice", "blue", "white"},
+    LogLevelStyleDefinition{LogLevel_Info, "info", "Info", "navy", "white"},
+    LogLevelStyleDefinition{LogLevel_Debug, "debug", "Debug", "teal", "white"},
+    LogLevelStyleDefinition{LogLevel_Trace, "trace", "Trace", "gray", "white"},
 };
 
 constexpr std::array kLineMarkStyleDefinitions{
@@ -77,6 +81,75 @@ QString markColorKey(const char* slot_key) {
   return QStringLiteral("ui/log/marks/%1").arg(QString::fromUtf8(slot_key));
 }
 
+QString migrateLegacyNamedColorChoice(const QString& color) {
+  const auto normalized = color.trimmed().toLower();
+  if (normalized == "#fffaf0") {
+    return QStringLiteral("#fffff0");
+  }
+  if (normalized == "#fff3a6") {
+    return QStringLiteral("#ffffe0");
+  }
+  if (normalized == "#facc15") {
+    return QStringLiteral("#ffff00");
+  }
+  if (normalized == "#f59e0b" || normalized == "#d97706" || normalized == "#ffa500") {
+    return QStringLiteral("orangered");
+  }
+  if (normalized == "#b22222") {
+    return QStringLiteral("#ff0000");
+  }
+  if (normalized == "#7f1d1d") {
+    return QStringLiteral("#800020");
+  }
+  if (normalized == "#8b5e3c") {
+    return QStringLiteral("#a52a2a");
+  }
+  if (normalized == "#dcfce7") {
+    return QStringLiteral("#f5fffa");
+  }
+  if (normalized == "#15803d") {
+    return QStringLiteral("#008000");
+  }
+  if (normalized == "#0f766e") {
+    return QStringLiteral("#008080");
+  }
+  if (normalized == "#0891b2") {
+    return QStringLiteral("#00ffff");
+  }
+  if (normalized == "#0ea5e9") {
+    return QStringLiteral("#87ceeb");
+  }
+  if (normalized == "#1e3a5f") {
+    return QStringLiteral("#000080");
+  }
+  if (normalized == "#4338ca") {
+    return QStringLiteral("#4b0082");
+  }
+  if (normalized == "#7c3aed") {
+    return QStringLiteral("#ee82ee");
+  }
+  if (normalized == "#db2777") {
+    return QStringLiteral("#ffc0cb");
+  }
+  if (normalized == "#d1d5db") {
+    return QStringLiteral("#c0c0c0");
+  }
+  if (normalized == "#6b7280") {
+    return QStringLiteral("#808080");
+  }
+  if (normalized == "#475569") {
+    return QStringLiteral("#708090");
+  }
+  if (normalized == "#2c2823") {
+    return QStringLiteral("#36454f");
+  }
+  if (normalized == "#111111") {
+    return QStringLiteral("#000000");
+  }
+
+  return color;
+}
+
 }  // namespace
 
 UiSettings::UiSettings(QObject* parent)
@@ -85,6 +158,8 @@ UiSettings::UiSettings(QObject* parent)
   log_font_families_ = font_database.families();
   std::sort(log_font_families_.begin(), log_font_families_.end());
   log_font_families_.removeDuplicates();
+  available_log_scanner_names_ = lgx::availableLogScannerNames();
+  available_log_scanner_names_.removeAll(QStringLiteral("Auto"));
 
   const QSettings settings;
   const auto default_family = defaultLogFontFamily();
@@ -96,21 +171,27 @@ UiSettings::UiSettings(QObject* parent)
       settings.value(QLatin1StringView{kLogZoomPercentKey}, kDefaultLogZoomPercent).toInt());
   follow_live_logs_by_default_ =
       settings.value(QLatin1StringView{kFollowLiveLogsByDefaultKey}, true).toBool();
+  wrap_log_lines_by_default_ =
+      settings.value(QLatin1StringView{kWrapLogLinesByDefaultKey}, false).toBool();
   follow_scroll_interval_ms_ = clampFollowScrollIntervalMs(
       settings.value(QLatin1StringView{kFollowScrollIntervalMsKey}, kDefaultFollowScrollIntervalMs).toInt());
   follow_high_rate_scroll_interval_ms_ = clampFollowScrollIntervalMs(
       settings.value(QLatin1StringView{kFollowHighRateScrollIntervalMsKey}, kDefaultFollowHighRateScrollIntervalMs)
           .toInt());
+  default_log_scanner_name_ = normalizeDefaultLogScannerName(
+      settings.value(QLatin1StringView{kDefaultLogScannerNameKey}, QStringLiteral("Generic")).toString());
   adb_executable_path_ =
       settings.value(QLatin1StringView{kAdbExecutablePathKey}, QString{}).toString().trimmed();
 
   for (const auto& definition : kLogLevelStyleDefinitions) {
     const auto level_index = static_cast<size_t>(definition.level);
     log_level_foreground_colors_[level_index] = normalizedColor(
-        settings.value(colorKey(definition.key, "foreground"), QString::fromUtf8(definition.foreground)).toString(),
+        migrateLegacyNamedColorChoice(
+            settings.value(colorKey(definition.key, "foreground"), QString::fromUtf8(definition.foreground)).toString()),
         QString::fromUtf8(definition.foreground));
     log_level_background_colors_[level_index] = normalizedColor(
-        settings.value(colorKey(definition.key, "background"), QString::fromUtf8(definition.background)).toString(),
+        migrateLegacyNamedColorChoice(
+            settings.value(colorKey(definition.key, "background"), QString::fromUtf8(definition.background)).toString()),
         QString::fromUtf8(definition.background));
   }
 
@@ -153,12 +234,24 @@ bool UiSettings::followLiveLogsByDefault() const noexcept {
   return follow_live_logs_by_default_;
 }
 
+bool UiSettings::wrapLogLinesByDefault() const noexcept {
+  return wrap_log_lines_by_default_;
+}
+
 int UiSettings::followScrollIntervalMs() const noexcept {
   return follow_scroll_interval_ms_;
 }
 
 int UiSettings::followHighRateScrollIntervalMs() const noexcept {
   return follow_high_rate_scroll_interval_ms_;
+}
+
+QStringList UiSettings::availableLogScannerNames() const {
+  return available_log_scanner_names_;
+}
+
+QString UiSettings::defaultLogScannerName() const noexcept {
+  return default_log_scanner_name_;
 }
 
 QString UiSettings::adbExecutablePath() const noexcept {
@@ -251,6 +344,16 @@ void UiSettings::setFollowLiveLogsByDefault(bool enabled) {
   emit followLiveLogsByDefaultChanged();
 }
 
+void UiSettings::setWrapLogLinesByDefault(bool enabled) {
+  if (wrap_log_lines_by_default_ == enabled) {
+    return;
+  }
+
+  wrap_log_lines_by_default_ = enabled;
+  saveValue(QLatin1StringView{kWrapLogLinesByDefaultKey}, enabled);
+  emit wrapLogLinesByDefaultChanged();
+}
+
 void UiSettings::setFollowScrollIntervalMs(int interval_ms) {
   const int clamped = clampFollowScrollIntervalMs(interval_ms);
   if (follow_scroll_interval_ms_ == clamped) {
@@ -271,6 +374,17 @@ void UiSettings::setFollowHighRateScrollIntervalMs(int interval_ms) {
   follow_high_rate_scroll_interval_ms_ = clamped;
   saveValue(QLatin1StringView{kFollowHighRateScrollIntervalMsKey}, follow_high_rate_scroll_interval_ms_);
   emit followHighRateScrollIntervalMsChanged();
+}
+
+void UiSettings::setDefaultLogScannerName(const QString& name) {
+  const auto normalized = normalizeDefaultLogScannerName(name);
+  if (default_log_scanner_name_ == normalized) {
+    return;
+  }
+
+  default_log_scanner_name_ = normalized;
+  saveValue(QLatin1StringView{kDefaultLogScannerNameKey}, default_log_scanner_name_);
+  emit defaultLogScannerNameChanged();
 }
 
 void UiSettings::setAdbExecutablePath(const QString& path) {
@@ -340,6 +454,15 @@ int UiSettings::clampZoomPercent(int percent) const noexcept {
 
 int UiSettings::clampFollowScrollIntervalMs(int interval_ms) const noexcept {
   return std::clamp(interval_ms, kMinFollowScrollIntervalMs, kMaxFollowScrollIntervalMs);
+}
+
+QString UiSettings::normalizeDefaultLogScannerName(const QString& name) const {
+  const auto trimmed = name.trimmed();
+  if (available_log_scanner_names_.contains(trimmed)) {
+    return trimmed;
+  }
+
+  return QStringLiteral("Generic");
 }
 
 size_t UiSettings::colorIndexForLevel(int level) const noexcept {

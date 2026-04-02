@@ -23,6 +23,19 @@ qt_add_qml_module(lgx_app
     qml/LogView.qml
   RESOURCES
     qml/fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf
+    qml/icons/tabler/LICENSE.txt
+    qml/icons/tabler/chevrons-down.svg
+    qml/icons/tabler/chevrons-up.svg
+    qml/icons/tabler/device-mobile.svg
+    qml/icons/tabler/error-next.svg
+    qml/icons/tabler/error-previous.svg
+    qml/icons/tabler/file-text.svg
+    qml/icons/tabler/packages.svg
+    qml/icons/tabler/player-skip-back.svg
+    qml/icons/tabler/player-skip-forward.svg
+    qml/icons/tabler/terminal-2.svg
+    qml/icons/tabler/warning-next.svg
+    qml/icons/tabler/warning-previous.svg
 )
 
 target_link_libraries(lgx_app

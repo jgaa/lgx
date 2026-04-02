@@ -20,10 +20,6 @@ void LoggingController::ensureDefaults(QSettings &settings) const {
   if (!settings.contains(QStringLiteral("logging/prune"))) {
     settings.setValue(QStringLiteral("logging/prune"), QStringLiteral("false"));
   }
-
-  if (!settings.contains(QStringLiteral("logging/trivial.llm.forward"))) {
-    settings.setValue(QStringLiteral("logging/trivial.llm.forward"), QStringLiteral("false"));
-  }
 }
 
 void LoggingController::initialize() const {

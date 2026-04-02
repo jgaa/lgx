@@ -5,9 +5,12 @@
 #include <QClipboard>
 #include <QDir>
 #include <QDirIterator>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QKeyEvent>
+#include <QKeySequence>
 #include <QProcess>
 #include <QUuid>
 #include <QQmlEngine>
@@ -37,6 +40,17 @@ constexpr auto kRecentPipeStreamsKey = "session/recentPipeStreams";
 constexpr auto kLogSourceMetadataKey = "session/logSourceMetadata";
 constexpr auto kLogSourceMetadataUrlKey = "url";
 constexpr auto kLogSourceMetadataScannerNameKey = "scannerName";
+constexpr auto kLogSourceMetadataWrapLogLinesKey = "wrapLogLines";
+constexpr auto kManagedCacheRootName = "lgx";
+
+QString managedCacheRootPath() {
+  QString cache_root = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+  if (cache_root.isEmpty()) {
+    cache_root = QDir::tempPath();
+  }
+
+  return QDir(cache_root).filePath(QLatin1StringView{kManagedCacheRootName});
+}
 
 QUrl normalizeSourceUrl(const QUrl& url) {
   return url.adjusted(QUrl::NormalizePathSegments | QUrl::StripTrailingSlash);
@@ -47,20 +61,28 @@ QVariantList sanitizedLogSourceMetadataEntries(const QVariant& value) {
   QSet<QString> seen_urls;
   const auto url_key = QString::fromLatin1(kLogSourceMetadataUrlKey);
   const auto scanner_name_key = QString::fromLatin1(kLogSourceMetadataScannerNameKey);
+  const auto wrap_log_lines_key = QString::fromLatin1(kLogSourceMetadataWrapLogLinesKey);
   for (const auto& entry_value : value.toList()) {
     const auto entry = entry_value.toMap();
     const auto canonical_url = normalizeSourceUrl(QUrl(entry.value(url_key).toString()));
     const auto scanner_name = entry.value(scanner_name_key).toString().trimmed();
+    const auto has_wrap_value = entry.contains(wrap_log_lines_key);
+    const auto wrap_log_lines = entry.value(wrap_log_lines_key).toBool();
     const auto encoded_url = canonical_url.toString();
-    if (!canonical_url.isValid() || canonical_url.isEmpty() || scanner_name.isEmpty()
-        || seen_urls.contains(encoded_url)) {
+    if (!canonical_url.isValid() || canonical_url.isEmpty() || seen_urls.contains(encoded_url)
+        || (scanner_name.isEmpty() && !has_wrap_value)) {
       continue;
     }
 
     seen_urls.insert(encoded_url);
     QVariantMap metadata_entry;
     metadata_entry.insert(url_key, encoded_url);
-    metadata_entry.insert(scanner_name_key, scanner_name);
+    if (!scanner_name.isEmpty()) {
+      metadata_entry.insert(scanner_name_key, scanner_name);
+    }
+    if (has_wrap_value) {
+      metadata_entry.insert(wrap_log_lines_key, wrap_log_lines);
+    }
     sanitized.push_back(metadata_entry);
     if (sanitized.size() == kLogSourceMetadataLimit) {
       break;
@@ -212,6 +234,9 @@ QString commandDisplayName(const QString& command) {
 
 AppEngine::AppEngine(QObject* parent)
     : QObject(parent) {
+  if (auto* app = QCoreApplication::instance()) {
+    app->installEventFilter(this);
+  }
   docker_executable_ = QStandardPaths::findExecutable(QStringLiteral("docker"));
   connect(&UiSettings::instance(), &UiSettings::adbExecutablePathChanged, this, [this]() {
     emit adbExecutablePathChanged();
@@ -220,6 +245,9 @@ AppEngine::AppEngine(QObject* parent)
   connect(&open_logs_, &QAbstractItemModel::rowsInserted, this, &AppEngine::openLogCountChanged);
   connect(&open_logs_, &QAbstractItemModel::rowsRemoved, this, &AppEngine::openLogCountChanged);
   connect(&open_logs_, &QAbstractItemModel::modelReset, this, &AppEngine::openLogCountChanged);
+  connect(&open_logs_, &QAbstractItemModel::rowsInserted, this, &AppEngine::openStreamCountChanged);
+  connect(&open_logs_, &QAbstractItemModel::rowsRemoved, this, &AppEngine::openStreamCountChanged);
+  connect(&open_logs_, &QAbstractItemModel::modelReset, this, &AppEngine::openStreamCountChanged);
   connect(&open_logs_, &QAbstractItemModel::rowsInserted, this, [this]() { updateCurrentLogModel(); });
   connect(&open_logs_, &QAbstractItemModel::rowsRemoved, this, [this]() { updateCurrentLogModel(); });
   connect(&open_logs_, &QAbstractItemModel::modelReset, this, [this]() { updateCurrentLogModel(); });
@@ -260,6 +288,17 @@ QAbstractItemModel* AppEngine::openLogs() noexcept {
 
 int AppEngine::openLogCount() const noexcept {
   return open_logs_.rowCount();
+}
+
+int AppEngine::openStreamCount() const noexcept {
+  int count = 0;
+  for (int index = 0; index < open_logs_.rowCount(); ++index) {
+    if (StreamSource::isSupportedUrl(open_logs_.sourceUrlAt(index))) {
+      ++count;
+    }
+  }
+
+  return count;
 }
 
 QAbstractItemModel* AppEngine::recentLogs() noexcept {
@@ -714,6 +753,94 @@ void AppEngine::logUiTrace(const QString& message) const {
   LOG_INFO << "UI: " << message.toStdString();
 }
 
+int AppEngine::activeLineMarkColor() const noexcept {
+  const auto log_active_mark_color = [this](const int color) {
+    QStringList pressed_keys;
+    pressed_keys.reserve(pressed_keys_.size());
+    for (const int key : pressed_keys_) {
+      pressed_keys.push_back(QKeySequence(key).toString());
+    }
+
+    LOG_TRACE_N << "activeLineMarkColor pressedKeys=[" << pressed_keys.join(QStringLiteral(", ")).toStdString()
+                << "] color=" << color;
+    return color;
+  };
+
+  if (pressed_keys_.contains(Qt::Key_6)) {
+    return log_active_mark_color(static_cast<int>(LineMark_Accent6));
+  }
+  if (pressed_keys_.contains(Qt::Key_5)) {
+    return log_active_mark_color(static_cast<int>(LineMark_Accent5));
+  }
+  if (pressed_keys_.contains(Qt::Key_4)) {
+    return log_active_mark_color(static_cast<int>(LineMark_Accent4));
+  }
+  if (pressed_keys_.contains(Qt::Key_3)) {
+    return log_active_mark_color(static_cast<int>(LineMark_Accent3));
+  }
+  if (pressed_keys_.contains(Qt::Key_2)) {
+    return log_active_mark_color(static_cast<int>(LineMark_Accent2));
+  }
+  if (pressed_keys_.contains(Qt::Key_1)) {
+    return log_active_mark_color(static_cast<int>(LineMark_Accent1));
+  }
+
+  return log_active_mark_color(static_cast<int>(LineMark_Default));
+}
+
+bool AppEngine::cleanCache() {
+  if (openStreamCount() > 0) {
+    LOG_WARN << "Refusing to clean cache while stream-backed sources are open";
+    return false;
+  }
+
+  const auto cache_root = managedCacheRootPath();
+  if (cache_root.isEmpty()) {
+    LOG_WARN << "Refusing to clean cache because managed cache root path is empty";
+    return false;
+  }
+
+  QDir cache_dir(cache_root);
+  if (!cache_dir.exists()) {
+    return true;
+  }
+
+  const bool removed = cache_dir.removeRecursively();
+  if (!removed) {
+    LOG_WARN << "Failed to remove managed cache root '" << cache_root.toStdString() << "'";
+  }
+  return removed;
+}
+
+bool AppEngine::wrapLogLinesForSource(const QUrl& url) const {
+  bool found = false;
+  const bool saved_value = savedLogSourceWrapLogLines(url, &found);
+  return found ? saved_value : UiSettings::instance().wrapLogLinesByDefault();
+}
+
+void AppEngine::saveWrapLogLinesForSource(const QUrl& url, bool enabled) const {
+  const auto canonical = canonicalUrl(url);
+  if (!canonical.isValid() || canonical.isEmpty()) {
+    return;
+  }
+
+  QString scanner_name;
+  if (auto* model = modelForUrl(canonical)) {
+    scanner_name = model->requestedScannerName().trimmed();
+    if (scanner_name.isEmpty()) {
+      scanner_name = model->scannerName().trimmed();
+    }
+  }
+  if (scanner_name.isEmpty()) {
+    scanner_name = savedLogSourceScannerName(canonical);
+  }
+  if (scanner_name.isEmpty()) {
+    scanner_name = UiSettings::instance().defaultLogScannerName();
+  }
+
+  saveLogSourceMetadata(canonical, scanner_name, enabled);
+}
+
 QObject* AppEngine::createLogModel(const QUrl& url) {
   const auto canonical = canonicalUrl(url);
   LOG_INFO << "Create log model request for '" << canonical.toString().toStdString() << "'";
@@ -744,6 +871,8 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
     if (const auto saved_scanner_name = savedLogSourceScannerName(canonical);
         !saved_scanner_name.isEmpty()) {
       source->setRequestedScannerName(saved_scanner_name.toStdString());
+    } else {
+      source->setRequestedScannerName(UiSettings::instance().defaultLogScannerName().toStdString());
     }
     source->open(canonical.toLocalFile().toStdString());
     model->setSource(std::move(source));
@@ -755,6 +884,8 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
     if (const auto saved_scanner_name = savedLogSourceScannerName(canonical);
         !saved_scanner_name.isEmpty()) {
       source->setRequestedScannerName(saved_scanner_name.toStdString());
+    } else {
+      source->setRequestedScannerName(UiSettings::instance().defaultLogScannerName().toStdString());
     }
     source->open(canonical.toString().toStdString());
     model->setSource(std::move(source));
@@ -888,6 +1019,41 @@ void AppEngine::updateCurrentLogModel() {
   if (previous_source_url != current_open_log_source_url_) {
     emit currentOpenLogSourceUrlChanged();
   }
+}
+
+bool AppEngine::eventFilter(QObject* watched, QEvent* event) {
+  switch (event->type()) {
+    case QEvent::KeyPress: {
+      const auto* key_event = static_cast<QKeyEvent*>(event);
+      if (!key_event->isAutoRepeat()) {
+        pressed_keys_.insert(key_event->key());
+        LOG_TRACE_N << "AppEngine key press key=" << key_event->key()
+                    << " text='" << key_event->text().toStdString()
+                    << "' sequence='" << QKeySequence(key_event->key()).toString().toStdString() << "'";
+      }
+      break;
+    }
+    case QEvent::KeyRelease: {
+      const auto* key_event = static_cast<QKeyEvent*>(event);
+      if (!key_event->isAutoRepeat()) {
+        pressed_keys_.remove(key_event->key());
+        LOG_TRACE_N << "AppEngine key release key=" << key_event->key()
+                    << " text='" << key_event->text().toStdString()
+                    << "' sequence='" << QKeySequence(key_event->key()).toString().toStdString() << "'";
+      }
+      break;
+    }
+    case QEvent::ApplicationDeactivate:
+      if (!pressed_keys_.isEmpty()) {
+        LOG_TRACE_N << "AppEngine clearing pressed keys on event type=" << static_cast<int>(event->type());
+      }
+      pressed_keys_.clear();
+      break;
+    default:
+      break;
+  }
+
+  return QObject::eventFilter(watched, event);
 }
 
 void AppEngine::saveSessionState() const {
@@ -1099,27 +1265,47 @@ void AppEngine::loadRecentPipeStreams() {
   emit recentPipeStreamsChanged();
 }
 
-void AppEngine::saveLogSourceMetadata(const QUrl& url, const QString& scanner_name) const {
+void AppEngine::saveLogSourceMetadata(const QUrl& url, const QString& scanner_name,
+                                      std::optional<bool> wrap_log_lines) const {
   const auto canonical = canonicalUrl(url);
   const auto normalized_scanner_name = scanner_name.trimmed();
-  if (!canonical.isValid() || canonical.isEmpty() || normalized_scanner_name.isEmpty()) {
+  if (!canonical.isValid() || canonical.isEmpty()) {
+    return;
+  }
+  if (normalized_scanner_name.isEmpty() && !wrap_log_lines.has_value()) {
     return;
   }
 
   const auto url_key = QString::fromLatin1(kLogSourceMetadataUrlKey);
   const auto scanner_name_key = QString::fromLatin1(kLogSourceMetadataScannerNameKey);
+  const auto wrap_log_lines_key = QString::fromLatin1(kLogSourceMetadataWrapLogLinesKey);
   QVariantList entries =
       sanitizedLogSourceMetadataEntries(QSettings{}.value(kLogSourceMetadataKey));
   const auto encoded_url = canonical.toString();
+  QVariantMap previous_entry;
   entries.erase(std::remove_if(entries.begin(), entries.end(),
-                               [&encoded_url](const QVariant& entry_value) {
-                                 return entry_value.toMap().value(QString::fromLatin1(kLogSourceMetadataUrlKey))
-                                     .toString() == encoded_url;
+                               [&encoded_url, &previous_entry](const QVariant& entry_value) {
+                                 const auto entry = entry_value.toMap();
+                                 const bool matches =
+                                     entry.value(QString::fromLatin1(kLogSourceMetadataUrlKey)).toString() == encoded_url;
+                                 if (matches) {
+                                   previous_entry = entry;
+                                 }
+                                 return matches;
                                }),
                 entries.end());
   QVariantMap metadata_entry;
   metadata_entry.insert(url_key, encoded_url);
-  metadata_entry.insert(scanner_name_key, normalized_scanner_name);
+  if (!normalized_scanner_name.isEmpty()) {
+    metadata_entry.insert(scanner_name_key, normalized_scanner_name);
+  } else if (previous_entry.contains(scanner_name_key)) {
+    metadata_entry.insert(scanner_name_key, previous_entry.value(scanner_name_key));
+  }
+  if (wrap_log_lines.has_value()) {
+    metadata_entry.insert(wrap_log_lines_key, *wrap_log_lines);
+  } else if (previous_entry.contains(wrap_log_lines_key)) {
+    metadata_entry.insert(wrap_log_lines_key, previous_entry.value(wrap_log_lines_key));
+  }
   entries.prepend(metadata_entry);
   while (entries.size() > kLogSourceMetadataLimit) {
     entries.removeLast();
@@ -1148,6 +1334,32 @@ QString AppEngine::savedLogSourceScannerName(const QUrl& url) const {
   }
 
   return {};
+}
+
+bool AppEngine::savedLogSourceWrapLogLines(const QUrl& url, bool* found) const {
+  const auto canonical = canonicalUrl(url);
+  if (found) {
+    *found = false;
+  }
+  if (!canonical.isValid() || canonical.isEmpty()) {
+    return false;
+  }
+
+  const auto url_key = QString::fromLatin1(kLogSourceMetadataUrlKey);
+  const auto wrap_log_lines_key = QString::fromLatin1(kLogSourceMetadataWrapLogLinesKey);
+  const auto encoded_url = canonical.toString();
+  const auto entries = sanitizedLogSourceMetadataEntries(QSettings{}.value(kLogSourceMetadataKey));
+  for (const auto& entry_value : entries) {
+    const auto entry = entry_value.toMap();
+    if (entry.value(url_key).toString() == encoded_url && entry.contains(wrap_log_lines_key)) {
+      if (found) {
+        *found = true;
+      }
+      return entry.value(wrap_log_lines_key).toBool();
+    }
+  }
+
+  return false;
 }
 
 }  // namespace lgx

@@ -320,5 +320,99 @@ TEST(FileSourceTests, LogfaultScannerExtendsPreviousEventWhenRefreshStartsWithCo
   EXPECT_EQ(fetched.lines[1].text, "2026-04-01 18:49:13.004 EEST INFO 52208 Done");
 }
 
+TEST(FileSourceTests, GenericScannerRecognizesEarlyMixedCaseAndBracketedLevels) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "generic-levels.log",
+      "2026-04-01 18:49:13.003 WarN first warning\n"
+      "2026-04-01 18:49:13.004 [e] second error\n"
+      "2026-04-01 18:49:13.005 [WarN][Note] third warning\n"
+      "2026-04-01 18:49:13.006 debug fourth debug\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Generic");
+  source.startIndexing();
+
+  const auto snapshot = source.snapshot();
+  EXPECT_EQ(snapshot.state, SourceState::Ready);
+  EXPECT_EQ(snapshot.line_count, 4U);
+
+  SourceLines fetched;
+  source.fetchLines(0, 4, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 4U);
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Warn);
+  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Error);
+  EXPECT_EQ(fetched.lines[2].log_level, LogLevel_Warn);
+  EXPECT_EQ(fetched.lines[3].log_level, LogLevel_Debug);
+}
+
+TEST(FileSourceTests, GenericScannerTreatsIndentedLinesAsContinuations) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "generic-multiline.log",
+      "2026-04-01 18:49:13.003 INFO start request\n"
+      " stack trace line 1\n"
+      " stack trace line 2\n"
+      "2026-04-01 18:49:13.004 INFO done\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Generic");
+  source.startIndexing();
+
+  EXPECT_EQ(source.snapshot().line_count, 2U);
+
+  SourceLines fetched;
+  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 2U);
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Info);
+  EXPECT_NE(fetched.lines[0].text.find("stack trace line 1"), std::string::npos);
+  EXPECT_NE(fetched.lines[0].text.find("stack trace line 2"), std::string::npos);
+  EXPECT_EQ(fetched.lines[1].text, "2026-04-01 18:49:13.004 INFO done");
+}
+
+TEST(FileSourceTests, GenericScannerDefaultsToInfoWithoutEarlyLevelMatch) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "generic-info-default.log",
+      "2026-04-01 18:49:13.003 host=api request completed with error count 2\n"
+      "2026-04-01 18:49:13.004 tenant=acme operation failed after timeout\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Generic");
+  source.startIndexing();
+
+  SourceLines fetched;
+  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 2U);
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Info);
+  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Info);
+}
+
+TEST(FileSourceTests, GenericScannerRecognizesDockerMariadbDualTimestampFormat) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "generic-mariadb.log",
+      "2026-04-02T07:14:01.638754741Z 2026-04-02 07:14:01+00:00 [Note] [Entrypoint]: started\n"
+      "2026-04-02T07:14:02.251932746Z 2026-04-02 7:14:02 0 [Warning] mariadbd: io_uring_queue_init() failed\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Generic");
+  source.startIndexing();
+
+  SourceLines fetched;
+  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 2U);
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Notice);
+  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Warn);
+}
+
 }  // namespace
 }  // namespace lgx

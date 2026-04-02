@@ -3,7 +3,9 @@
 #include <QAbstractItemModel>
 #include <QHash>
 #include <QObject>
+#include <optional>
 #include <QPointer>
+#include <QSet>
 #include <QStringList>
 #include <QUrl>
 
@@ -33,6 +35,7 @@ class AppEngine : public QObject {
   Q_OBJECT
   Q_PROPERTY(QAbstractItemModel* openLogs READ openLogs CONSTANT)
   Q_PROPERTY(int openLogCount READ openLogCount NOTIFY openLogCountChanged)
+  Q_PROPERTY(int openStreamCount READ openStreamCount NOTIFY openStreamCountChanged)
   Q_PROPERTY(QAbstractItemModel* recentLogs READ recentLogs CONSTANT)
   Q_PROPERTY(int recentLogCount READ recentLogCount NOTIFY recentLogsChanged)
   Q_PROPERTY(QAbstractItemModel* recentPipeStreams READ recentPipeStreams CONSTANT)
@@ -67,6 +70,7 @@ class AppEngine : public QObject {
 
   [[nodiscard]] QAbstractItemModel* openLogs() noexcept;
   [[nodiscard]] int openLogCount() const noexcept;
+  [[nodiscard]] int openStreamCount() const noexcept;
   [[nodiscard]] QAbstractItemModel* recentLogs() noexcept;
   [[nodiscard]] int recentLogCount() const noexcept;
   [[nodiscard]] QAbstractItemModel* recentPipeStreams() noexcept;
@@ -131,6 +135,10 @@ class AppEngine : public QObject {
   Q_INVOKABLE QString displaySourceTextForUrl(const QUrl& url) const;
   Q_INVOKABLE void copyTextToClipboard(const QString& text) const;
   Q_INVOKABLE void logUiTrace(const QString& message) const;
+  Q_INVOKABLE int activeLineMarkColor() const noexcept;
+  Q_INVOKABLE bool cleanCache();
+  Q_INVOKABLE bool wrapLogLinesForSource(const QUrl& url) const;
+  Q_INVOKABLE void saveWrapLogLinesForSource(const QUrl& url, bool enabled) const;
 
   /**
    * @brief Create or reuse a model for one log source URL.
@@ -177,6 +185,7 @@ class AppEngine : public QObject {
 
  signals:
   void openLogCountChanged();
+  void openStreamCountChanged();
   void recentLogsChanged();
   void recentPipeStreamsChanged();
   void adbExecutablePathChanged();
@@ -192,6 +201,7 @@ class AppEngine : public QObject {
   void currentLogModelChanged();
 
  private:
+  bool eventFilter(QObject* watched, QEvent* event) override;
   [[nodiscard]] static QString titleForUrl(const QUrl& url);
   [[nodiscard]] static QString displaySourceForUrl(const QUrl& url);
   int openLogSourceInternal(const QUrl& url, bool add_to_recent);
@@ -200,8 +210,10 @@ class AppEngine : public QObject {
   void addRecentPipeStream(const QUrl& url);
   void removeRecentPipeStream(const QUrl& url);
   void loadRecentPipeStreams();
-  void saveLogSourceMetadata(const QUrl& url, const QString& scanner_name) const;
+  void saveLogSourceMetadata(const QUrl& url, const QString& scanner_name,
+                             std::optional<bool> wrap_log_lines = std::nullopt) const;
   [[nodiscard]] QString savedLogSourceScannerName(const QUrl& url) const;
+  [[nodiscard]] bool savedLogSourceWrapLogLines(const QUrl& url, bool* found = nullptr) const;
   void updateCurrentLogModel();
 
   struct ModelEntry {
@@ -225,6 +237,7 @@ class AppEngine : public QObject {
   int current_open_log_index_{-1};
   QUrl current_open_log_source_url_;
   QPointer<LogModel> current_log_model_;
+  QSet<int> pressed_keys_;
 };
 
 }  // namespace lgx

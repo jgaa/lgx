@@ -12,6 +12,8 @@ AbstractButton {
     implicitHeight: implicitWidth
     padding: 0
     hoverEnabled: true
+    focusPolicy: Qt.NoFocus
+    activeFocusOnTab: false
 
     contentItem: Label {
         horizontalAlignment: Text.AlignHCenter

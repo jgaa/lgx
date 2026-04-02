@@ -11,31 +11,47 @@ ScrollView {
     readonly property real rowSpacing: 12
     readonly property real levelColumnWidth: Math.min(120, Math.max(88, availableWidth * 0.18))
     readonly property var colorChoices: [
-        { name: qsTr("White"), value: "#ffffff" },
-        { name: qsTr("Ivory"), value: "#fffaf0" },
-        { name: qsTr("Beige"), value: "#f5f5dc" },
-        { name: qsTr("Light Yellow"), value: "#fff3a6" },
-        { name: qsTr("Yellow"), value: "#facc15" },
-        { name: qsTr("Amber"), value: "#f59e0b" },
-        { name: qsTr("Orange"), value: "#d97706" },
-        { name: qsTr("Coral"), value: "#f97316" },
-        { name: qsTr("Red"), value: "#b22222" },
-        { name: qsTr("Burgundy"), value: "#7f1d1d" },
-        { name: qsTr("Brown"), value: "#8b5e3c" },
-        { name: qsTr("Mint"), value: "#dcfce7" },
-        { name: qsTr("Green"), value: "#15803d" },
-        { name: qsTr("Teal"), value: "#0f766e" },
-        { name: qsTr("Cyan"), value: "#0891b2" },
-        { name: qsTr("Sky Blue"), value: "#0ea5e9" },
-        { name: qsTr("Navy"), value: "#1e3a5f" },
-        { name: qsTr("Indigo"), value: "#4338ca" },
-        { name: qsTr("Violet"), value: "#7c3aed" },
-        { name: qsTr("Pink"), value: "#db2777" },
-        { name: qsTr("Silver"), value: "#d1d5db" },
-        { name: qsTr("Gray"), value: "#6b7280" },
-        { name: qsTr("Slate"), value: "#475569" },
-        { name: qsTr("Charcoal"), value: "#2c2823" },
-        { name: qsTr("Black"), value: "#111111" }
+        { name: qsTr("White"), value: "white" },
+        { name: qsTr("Ivory"), value: "ivory" },
+        { name: qsTr("Beige"), value: "beige" },
+        { name: qsTr("Light Yellow"), value: "lightyellow" },
+        { name: qsTr("Yellow"), value: "yellow" },
+        { name: qsTr("Amber"), value: "#ffbf00" },
+        { name: qsTr("Orange"), value: "orange" },
+        { name: qsTr("Orange Red"), value: "orangered" },
+        { name: qsTr("Coral"), value: "coral" },
+        { name: qsTr("Red"), value: "red" },
+        { name: qsTr("Crimson"), value: "crimson" },
+        { name: qsTr("Burgundy"), value: "#800020" },
+        { name: qsTr("Magenta"), value: "magenta" },
+        { name: qsTr("Dark Magenta"), value: "darkmagenta" },
+        { name: qsTr("Maroon"), value: "maroon" },
+        { name: qsTr("Brown"), value: "brown" },
+        { name: qsTr("Mint"), value: "mintcream" },
+        { name: qsTr("Green"), value: "green" },
+        { name: qsTr("Sea Green"), value: "seagreen" },
+        { name: qsTr("Olive"), value: "olive" },
+        { name: qsTr("Dark Olive"), value: "darkolivegreen" },
+        { name: qsTr("Teal"), value: "teal" },
+        { name: qsTr("Cyan"), value: "cyan" },
+        { name: qsTr("Sky Blue"), value: "skyblue" },
+        { name: qsTr("Blue"), value: "blue" },
+        { name: qsTr("Royal Blue"), value: "royalblue" },
+        { name: qsTr("Cornflower Blue"), value: "cornflowerblue" },
+        { name: qsTr("Navy"), value: "navy" },
+        { name: qsTr("Midnight Blue"), value: "midnightblue" },
+        { name: qsTr("Dark Slate Blue"), value: "darkslategray" },
+        { name: qsTr("Gold"), value: "gold" },
+        { name: qsTr("Dark Golden Rod"), value: "darkgoldenrod" },
+        { name: qsTr("Purple"), value: "purple" },
+        { name: qsTr("Indigo"), value: "indigo" },
+        { name: qsTr("Violet"), value: "violet" },
+        { name: qsTr("Pink"), value: "pink" },
+        { name: qsTr("Silver"), value: "silver" },
+        { name: qsTr("Gray"), value: "gray" },
+        { name: qsTr("Slate"), value: "slategray" },
+        { name: qsTr("Charcoal"), value: "#36454f" },
+        { name: qsTr("Black"), value: "black" }
     ]
 
     function cloneLogLevelStyles() {
@@ -51,7 +67,8 @@ ScrollView {
     function colorChoiceIndex(value) {
         const normalizedValue = value ? value.toString().toLowerCase() : ""
         for (let index = 0; index < colorChoices.length; ++index) {
-            if (colorChoices[index].value.toLowerCase() === normalizedValue) {
+            const candidateValue = colorChoices[index].value.toLowerCase()
+            if (candidateValue === normalizedValue || Qt.colorEqual(colorChoices[index].value, value)) {
                 return index
             }
         }

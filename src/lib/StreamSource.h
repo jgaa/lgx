@@ -6,12 +6,13 @@
 
 #include <QByteArray>
 #include <QFile>
-#include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
 
 #include "FileSource.h"
 #include "LogSource.h"
+
+class QTemporaryDir;
 
 namespace lgx {
 
@@ -94,12 +95,13 @@ class StreamSource final : public LogSource {
  private:
   [[nodiscard]] static std::unique_ptr<IStreamProvider> createProvider(const QUrl& url);
   [[nodiscard]] bool ensureSpoolFile();
+  void clearSpoolDirectory();
   void enqueueProviderBytes(QByteArray bytes);
   void flushPendingBytes();
   void fail(QString message);
 
   FileSource spool_source_{std::shared_ptr<IFileMonitor>{}};
-  QTemporaryDir spool_dir_;
+  std::unique_ptr<QTemporaryDir> spool_dir_;
   QFile spool_file_;
   QTimer flush_timer_;
   QByteArray pending_bytes_;

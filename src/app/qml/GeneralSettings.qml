@@ -11,8 +11,10 @@ ScrollView {
     property int originalLogBaseFontPixelSize: UiSettings.logBaseFontPixelSize
     property int originalLogZoomPercent: UiSettings.logZoomPercent
     property bool originalFollowLiveLogsByDefault: UiSettings.followLiveLogsByDefault
+    property bool originalWrapLogLinesByDefault: UiSettings.wrapLogLinesByDefault
     property int originalFollowScrollIntervalMs: UiSettings.followScrollIntervalMs
     property int originalFollowHighRateScrollIntervalMs: UiSettings.followHighRateScrollIntervalMs
+    property string originalDefaultLogScannerName: UiSettings.defaultLogScannerName
 
     Settings {
         id: settings
@@ -50,11 +52,15 @@ ScrollView {
         originalLogBaseFontPixelSize = UiSettings.logBaseFontPixelSize
         originalLogZoomPercent = UiSettings.logZoomPercent
         originalFollowLiveLogsByDefault = UiSettings.followLiveLogsByDefault
+        originalWrapLogLinesByDefault = UiSettings.wrapLogLinesByDefault
         originalFollowScrollIntervalMs = UiSettings.followScrollIntervalMs
         originalFollowHighRateScrollIntervalMs = UiSettings.followHighRateScrollIntervalMs
+        originalDefaultLogScannerName = UiSettings.defaultLogScannerName
         followLiveLogsByDefaultCheck.checked = UiSettings.followLiveLogsByDefault
+        wrapLogLinesByDefaultCheck.checked = UiSettings.wrapLogLinesByDefault
         followScrollIntervalSpin.value = UiSettings.followScrollIntervalMs
         followHighRateScrollIntervalSpin.value = UiSettings.followHighRateScrollIntervalMs
+        defaultScannerCombo.currentIndex = defaultScannerCombo.find(UiSettings.defaultLogScannerName)
         syncAppearanceControls()
     }
 
@@ -63,11 +69,15 @@ ScrollView {
         UiSettings.setLogBaseFontPixelSize(originalLogBaseFontPixelSize)
         UiSettings.setLogZoomPercent(originalLogZoomPercent)
         UiSettings.setFollowLiveLogsByDefault(originalFollowLiveLogsByDefault)
+        UiSettings.setWrapLogLinesByDefault(originalWrapLogLinesByDefault)
         UiSettings.setFollowScrollIntervalMs(originalFollowScrollIntervalMs)
         UiSettings.setFollowHighRateScrollIntervalMs(originalFollowHighRateScrollIntervalMs)
+        UiSettings.setDefaultLogScannerName(originalDefaultLogScannerName)
         followLiveLogsByDefaultCheck.checked = UiSettings.followLiveLogsByDefault
+        wrapLogLinesByDefaultCheck.checked = UiSettings.wrapLogLinesByDefault
         followScrollIntervalSpin.value = UiSettings.followScrollIntervalMs
         followHighRateScrollIntervalSpin.value = UiSettings.followHighRateScrollIntervalMs
+        defaultScannerCombo.currentIndex = defaultScannerCombo.find(UiSettings.defaultLogScannerName)
         syncAppearanceControls()
     }
 
@@ -171,6 +181,30 @@ ScrollView {
                         text: qsTr("Follow live logs automatically")
                         checked: UiSettings.followLiveLogsByDefault
                         onToggled: UiSettings.setFollowLiveLogsByDefault(checked)
+                    }
+
+                    Label {
+                        text: qsTr("Default Wrap")
+                    }
+
+                    CheckBox {
+                        id: wrapLogLinesByDefaultCheck
+                        Layout.fillWidth: true
+                        text: qsTr("Wrap long log lines automatically")
+                        checked: UiSettings.wrapLogLinesByDefault
+                        onToggled: UiSettings.setWrapLogLinesByDefault(checked)
+                    }
+
+                    Label {
+                        text: qsTr("Default Format")
+                    }
+
+                    ComboBox {
+                        id: defaultScannerCombo
+                        Layout.fillWidth: true
+                        model: UiSettings.availableLogScannerNames
+                        currentIndex: find(UiSettings.defaultLogScannerName)
+                        onActivated: UiSettings.setDefaultLogScannerName(currentText)
                     }
 
                     Label {

@@ -22,7 +22,6 @@ Item {
     property int popupLineIndex: -1
     property string popupLineText: ""
     property real maxRowWidth: 0
-    property int pendingMarkColor: 1
     readonly property bool hasSelection: selectedIndexes.length > 0
     readonly property string selectedText: selectedIndexes
         .map(function(index) {
@@ -61,8 +60,17 @@ Item {
         return index % 2 === 0 ? 0.0 : 0.025
     }
 
+    function rowBackgroundColor(index, logLevel) {
+        const baseColor = levelBackgroundColor(logLevel)
+        return index % 2 === 0 ? baseColor : Qt.darker(baseColor, 1.025)
+    }
+
     function currentMarkColor() {
-        return pendingMarkColor
+        return AppEngine.activeLineMarkColor()
+    }
+
+    function isIndexSelected(index) {
+        return selectedRowsByIndex[index] !== undefined
     }
 
     function resolveLineMarkColor(markColor) {
@@ -72,32 +80,6 @@ Item {
 
     function gutterBackgroundColor(logLevel) {
         return Qt.darker(levelBackgroundColor(logLevel), 1.12)
-    }
-
-    function updatePendingMarkColorForKey(key, active) {
-        let nextColor = 1
-        if (key === Qt.Key_1) {
-            nextColor = 2
-        } else if (key === Qt.Key_2) {
-            nextColor = 3
-        } else if (key === Qt.Key_3) {
-            nextColor = 4
-        } else if (key === Qt.Key_4) {
-            nextColor = 5
-        } else if (key === Qt.Key_5) {
-            nextColor = 6
-        } else if (key === Qt.Key_6) {
-            nextColor = 7
-        } else {
-            return false
-        }
-
-        pendingMarkColor = active ? nextColor : 1
-        return true
-    }
-
-    function isIndexSelected(index) {
-        return selectedRowsByIndex[index] !== undefined
     }
 
     function setSelectedRows(entries) {
@@ -261,13 +243,32 @@ Item {
         listView.positionViewAtEnd()
     }
 
-    function jumpByPercent(deltaPercent) {
+    function isEffectivelyAtEnd() {
         const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
         if (maximumContentY <= 0) {
+            return true
+        }
+
+        return listView.contentY >= maximumContentY - 1
+    }
+
+    function jumpByPercent(deltaPercent) {
+        const maximumContentY = Math.max(0, listView.contentHeight - listView.height)
+        if (maximumContentY <= 0 || deltaPercent === 0) {
             return
         }
 
         const nextContentY = Math.max(0, Math.min(maximumContentY, listView.contentY + maximumContentY * deltaPercent / 100.0))
+        if (nextContentY <= 1) {
+            scrollToFirst()
+            return
+        }
+
+        if (nextContentY >= maximumContentY - 1) {
+            scrollToLast()
+            return
+        }
+
         listView.contentY = nextContentY
     }
 
@@ -326,11 +327,6 @@ Item {
 
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: function(event) {
-        if (root.updatePendingMarkColorForKey(event.key, true)) {
-            event.accepted = true
-            return
-        }
-
         if (event.key === Qt.Key_PageUp) {
             root.pageScrollRequested(-1)
             root.scrollByPages(-1)
@@ -341,11 +337,6 @@ Item {
         if (event.key === Qt.Key_PageDown) {
             root.pageScrollRequested(1)
             root.scrollByPages(1)
-            event.accepted = true
-        }
-    }
-    Keys.onReleased: function(event) {
-        if (root.updatePendingMarkColorForKey(event.key, false)) {
             event.accepted = true
         }
     }
@@ -453,6 +444,7 @@ Item {
 
     Frame {
         anchors.fill: parent
+        padding: 0
 
         ListView {
             id: listView
@@ -462,8 +454,11 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             interactive: !root.pointerSelectionActive
             rightMargin: verticalScrollBar.width
-            bottomMargin: horizontalScrollBar.height
             contentWidth: root.wrapLogLines ? width : Math.max(width, root.maxRowWidth)
+            footer: Item {
+                width: listView.width
+                height: horizontalScrollBar.height
+            }
             onContentYChanged: root.updateTopVisibleIndex()
             onCountChanged: {
                 root.updateTopVisibleIndex()
@@ -511,8 +506,8 @@ Item {
                         ? ListView.view.width - ListView.view.rightMargin
                         : Math.max(ListView.view.width - ListView.view.rightMargin, contentRow.implicitWidth + gutter.width + 18))
                     : contentRow.implicitWidth + gutter.width + 18
-                height: Math.max(rowFontPixelSize, contentRow.implicitHeight) + 12
-                color: root.isIndexSelected(index) ? "#d7e6f5" : root.levelBackgroundColor(logLevel)
+                height: Math.max(rowFontPixelSize, contentRow.implicitHeight) + 8
+                color: root.isIndexSelected(index) ? "#d7e6f5" : root.rowBackgroundColor(index, logLevel)
 
                 Component.onCompleted: {
                     if (width > root.maxRowWidth) {
@@ -524,12 +519,6 @@ Item {
                     if (width > root.maxRowWidth) {
                         root.maxRowWidth = width
                     }
-                }
-
-                Rectangle {
-                    anchors.fill: parent
-                    color: "#000000"
-                    opacity: root.isIndexSelected(index) ? 0.0 : root.lineShadeOpacity(index)
                 }
 
                 Rectangle {
@@ -563,9 +552,9 @@ Item {
 
                     Row {
                         id: contentRow
-                        x: 6
-                        y: 6
-                        spacing: 12
+                        x: 4
+                        y: 4
+                        spacing: 8
 
                         Label {
                             id: lineNumberLabel
@@ -573,6 +562,7 @@ Item {
                             color: Qt.darker(root.levelForegroundColor(logLevel), 1.1)
                             font.family: UiSettings.logFontFamily
                             font.pixelSize: rowFontPixelSize
+                            renderType: Text.NativeRendering
                         }
 
                         Label {
@@ -585,6 +575,7 @@ Item {
                             font.family: UiSettings.logFontFamily
                             font.pixelSize: rowFontPixelSize
                             color: root.levelForegroundColor(logLevel)
+                            renderType: Text.NativeRendering
                         }
                     }
                 }
@@ -658,7 +649,7 @@ Item {
         anchors.centerIn: parent
         visible: !!root.rowModel && root.listView.count === 0
         text: root.emptyText
-        color: "#6c655c"
+        color: "slategray"
     }
 
     Shortcut {

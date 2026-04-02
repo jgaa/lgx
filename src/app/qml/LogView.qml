@@ -67,6 +67,7 @@ Item {
 
         claimedSourceUrl = sourceUrl
         logModel = createdModel
+        wrapLogLines = AppEngine.wrapLogLinesForSource(sourceUrl)
         lineList.clearSelection()
         lineList.finishPointerSelection()
         if (createdModel.following) {
@@ -119,23 +120,34 @@ Item {
     }
 
     function scrollToFirst() {
-        lineList.scrollToFirst()
+        performManualNavigation(function() {
+            lineList.scrollToFirst()
+        })
     }
 
     function scrollToLast() {
-        lineList.scrollToLast()
+        performManualNavigation(function() {
+            lineList.scrollToLast()
+        })
     }
 
     function scrollUpTenPercent() {
-        lineList.jumpByPercent(-10)
+        performManualNavigation(function() {
+            lineList.jumpByPercent(-10)
+        })
     }
 
     function scrollDownTenPercent() {
-        lineList.jumpByPercent(10)
+        performManualNavigation(function() {
+            lineList.jumpByPercent(10)
+        })
     }
 
     function setWrapLogLines(enabled) {
         wrapLogLines = enabled
+        if (primaryView && sourceUrl && sourceUrl.toString().length > 0) {
+            AppEngine.saveWrapLogLinesForSource(sourceUrl, enabled)
+        }
     }
 
     function toggleWrapLogLines() {
@@ -169,11 +181,26 @@ Item {
         }
 
         const targetIndex = Math.max(0, Math.min(lineList.lineCount - 1, Math.trunc(parsedLine) - 1))
-        if (!!logModel && logModel.following) {
-            setFollowing(false)
+        let navigated = false
+        performManualNavigation(function() {
+            navigated = lineList.selectSingleRow(targetIndex, ListView.Beginning)
+        })
+        return navigated
+    }
+
+    function performManualNavigation(navigate) {
+        const wasFollowing = root.following
+        navigate()
+        if (!wasFollowing) {
+            return
         }
 
-        return lineList.selectSingleRow(targetIndex, ListView.Beginning)
+        if (lineList.isEffectivelyAtEnd()) {
+            ensureFollowingAtEnd()
+            return
+        }
+
+        setFollowing(false)
     }
 
     function navigateToLevel(level, forward) {
@@ -190,7 +217,9 @@ Item {
             ? logModel.nextLineOfLevel(start, level)
             : logModel.previousLineOfLevel(start, level)
         if (targetIndex >= 0) {
-            lineList.selectSingleRow(targetIndex, ListView.Visible)
+            performManualNavigation(function() {
+                lineList.selectSingleRow(targetIndex, ListView.Center)
+            })
         }
     }
 
@@ -233,17 +262,15 @@ Item {
     }
 
     function scrollByRows(deltaRows) {
-        if (root.following) {
-            root.setFollowing(false)
-        }
-        lineList.scrollByRows(deltaRows)
+        performManualNavigation(function() {
+            lineList.scrollByRows(deltaRows)
+        })
     }
 
     function scrollByPages(deltaPages) {
-        if (root.following) {
-            root.setFollowing(false)
-        }
-        lineList.scrollByPages(deltaPages)
+        performManualNavigation(function() {
+            lineList.scrollByPages(deltaPages)
+        })
     }
 
     onSourceUrlChanged: acquireLogModel()
@@ -267,7 +294,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#fbf8f2"
+        color: "#d3d7dd"
     }
 
     WheelHandler {
@@ -294,31 +321,26 @@ Item {
     LogLineList {
         id: lineList
         anchors.fill: parent
-        anchors.margins: 20
+        anchors.margins: 4
         rowModel: root.logModel
         wrapLogLines: root.wrapLogLines
         followMode: root.following
         emptyText: qsTr("Log is open, but no rows are loaded yet.")
         onActivated: root.activateView()
-        onPageScrollRequested: function() {
-            if (root.following) {
-                root.setFollowing(false)
-            }
-        }
     }
 
     SymbolToolButton {
         id: viewMenuButton
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: 10
+        anchors.margins: 2
         z: 2
         visible: viewMenuButton.hovered || viewMenuButton.down || viewHoverArea.containsMouse
         symbol: "menu"
-        symbolPixelSize: 18
-        implicitWidth: 28
-        implicitHeight: 28
-        bgColor: "#efe7db"
+        symbolPixelSize: 14
+        implicitWidth: 18
+        implicitHeight: 18
+        bgColor: "#00000000"
         onClicked: root.openViewMenu()
     }
 

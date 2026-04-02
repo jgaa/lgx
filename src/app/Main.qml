@@ -68,6 +68,10 @@ ApplicationWindow {
         }
     }
 
+    function setCurrentTabIndex(index) {
+        tabBar.currentIndex = index
+    }
+
     function toggleActiveFollow() {
         if (activeCurrentLogModel) {
             activeCurrentLogModel.toggleFollowing()
@@ -149,6 +153,10 @@ ApplicationWindow {
 
     function openPipeStreamDialog() {
         openPipeStreamDialogBox.open()
+    }
+
+    function tablerIcon(name) {
+        return Qt.resolvedUrl("qml/icons/tabler/" + name + ".svg")
     }
 
     property var dockerSelectionMap: ({})
@@ -299,7 +307,7 @@ ApplicationWindow {
                             Qt.callLater(function() {
                                 const openedIndex = AppEngine.openRecentLogSourceAt(index)
                                 if (openedIndex >= 0) {
-                                    tabBar.currentIndex = openedIndex
+                                    window.setCurrentTabIndex(openedIndex)
                                 }
                             })
                         }
@@ -327,6 +335,14 @@ ApplicationWindow {
                 text: qsTr("Close all")
                 enabled: AppEngine.openLogCount > 0
                 onTriggered: window.closeAllTabs()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: qsTr("Clean Cache")
+                enabled: AppEngine.openStreamCount === 0
+                onTriggered: AppEngine.cleanCache()
             }
 
             MenuSeparator {}
@@ -381,7 +397,7 @@ ApplicationWindow {
                             Qt.callLater(function() {
                                 const openedIndex = AppEngine.openRecentPipeStreamAt(index)
                                 if (openedIndex >= 0) {
-                                    tabBar.currentIndex = openedIndex
+                                    window.setCurrentTabIndex(openedIndex)
                                 }
                             })
                         }
@@ -598,11 +614,11 @@ ApplicationWindow {
 
     header: ToolBar {
         visible: AppEngine.openLogCount > 0
-        padding: 8
+        padding: 4
 
         RowLayout {
             width: parent.width
-            spacing: 10
+            spacing: 6
 
             Label {
                 text: qsTr("Follow")
@@ -666,33 +682,39 @@ ApplicationWindow {
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "first_page"
+                iconSource: window.tablerIcon("player-skip-back")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("First line")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.scrollToFirst()
             }
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "keyboard_double_arrow_up"
+                iconSource: window.tablerIcon("chevrons-up")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Jump up 10%")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.scrollUpTenPercent()
             }
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "keyboard_arrow_up"
+                iconSource: window.tablerIcon("error-previous")
+                fgColor: "#8f2626"
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Previous error")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.goToPreviousError()
             }
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "warning"
+                iconSource: window.tablerIcon("warning-previous")
+                fgColor: "#8a5a00"
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Previous warning")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.goToPreviousWarning()
             }
 
@@ -709,33 +731,39 @@ ApplicationWindow {
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "warning"
+                iconSource: window.tablerIcon("warning-next")
+                fgColor: "#8a5a00"
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Next warning")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.goToNextWarning()
             }
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "keyboard_arrow_down"
+                iconSource: window.tablerIcon("error-next")
+                fgColor: "#8f2626"
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Next error")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.goToNextError()
             }
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "keyboard_double_arrow_down"
+                iconSource: window.tablerIcon("chevrons-down")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Jump down 10%")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.scrollDownTenPercent()
             }
 
             LgxQml.SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
-                symbol: "last_page"
+                iconSource: window.tablerIcon("player-skip-forward")
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Last line")
+                accessibleName: ToolTip.text
                 onClicked: window.activeLogView.scrollToLast()
             }
 
@@ -748,15 +776,15 @@ ApplicationWindow {
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#f4f1ea" }
-            GradientStop { position: 1.0; color: "#d9e6f2" }
+            GradientStop { position: 0.0; color: "silver" }
+            GradientStop { position: 1.0; color: "darkgrey" }
         }
     }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 6
+        spacing: 4
 
         TabBar {
             id: tabBar
@@ -775,7 +803,13 @@ ApplicationWindow {
                     property var tabLogModel: null
                     readonly property string sourceScheme: sourceUrl ? sourceUrl.toString().split(":")[0] : ""
                     readonly property bool isStreamSource: sourceScheme === "pipe" || sourceScheme === "docker" || sourceScheme === "adb"
-                    readonly property string sourceSymbol: isStreamSource ? "stream" : "draft"
+                    readonly property url sourceIconSource: sourceScheme === "docker"
+                                                           ? window.tablerIcon("packages")
+                                                           : (sourceScheme === "pipe"
+                                                              ? window.tablerIcon("terminal-2")
+                                                              : (sourceScheme === "adb"
+                                                                 ? window.tablerIcon("device-mobile")
+                                                                 : window.tablerIcon("file-text")))
 
                     padding: 0
                     implicitWidth: tabContent.implicitWidth + 24
@@ -796,13 +830,17 @@ ApplicationWindow {
                         id: tabContent
                         spacing: 6
 
-                        Label {
+                        Image {
                             Layout.alignment: Qt.AlignVCenter
                             Layout.leftMargin: 10
-                            text: tabButton.sourceSymbol
-                            font.family: "Material Symbols Outlined"
-                            font.pixelSize: 16
-                            color: "#6c655c"
+                            source: tabButton.sourceIconSource
+                            sourceSize.width: 16
+                            sourceSize.height: 16
+                            width: 16
+                            height: 16
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            mipmap: true
                         }
 
                         Label {
@@ -898,11 +936,14 @@ ApplicationWindow {
 
     footer: Frame {
         visible: AppEngine.openLogCount > 0
-        padding: 8
+        topPadding: 3
+        bottomPadding: 3
+        leftPadding: 6
+        rightPadding: 6
 
         RowLayout {
             width: parent.width
-            spacing: 10
+            spacing: 6
 
             Label {
                 text: qsTr("Source")
@@ -912,6 +953,7 @@ ApplicationWindow {
             TextInput {
                 id: sourceField
                 Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
                 readOnly: true
                 selectByMouse: true
                 text: window.activeSourceText
@@ -919,6 +961,8 @@ ApplicationWindow {
                 selectedTextColor: "#fbf8f2"
                 selectionColor: "#7f9bb8"
                 clip: true
+                topPadding: 0
+                bottomPadding: 0
             }
 
             LgxQml.SymbolToolButton {

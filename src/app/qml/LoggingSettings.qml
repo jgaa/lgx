@@ -26,7 +26,6 @@ ScrollView {
         settings.setValue("logging/level", logLevelFile.currentIndex.toString())
         settings.setValue("logging/applevel", logLevelApp.currentIndex.toString())
         settings.setValue("logging/prune", prune.checked ? "true" : "false")
-        settings.setValue("logging/trivial.llm.forward", forwardTrivial.checked ? "true" : "false")
         settings.sync()
     }
 
@@ -35,7 +34,6 @@ ScrollView {
         logLevelFile.currentIndex = intValue("logging/level", 0)
         logPath.text = stringValue("logging/path", "")
         prune.checked = stringValue("logging/prune", "false") === "true"
-        forwardTrivial.checked = stringValue("logging/trivial.llm.forward", "false") === "true"
     }
 
     GridLayout {
@@ -102,14 +100,6 @@ ScrollView {
             id: prune
             text: qsTr("Prune log-file when starting")
             checked: stringValue("logging/prune", "false") === "true"
-        }
-
-        Item {}
-
-        CheckBox {
-            id: forwardTrivial
-            text: qsTr("Forward trivial log message from models")
-            checked: stringValue("logging/trivial.llm.forward", "false") === "true"
         }
 
         Label {

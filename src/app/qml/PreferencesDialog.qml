@@ -10,7 +10,7 @@ Dialog {
     title: qsTr("Preferences")
     standardButtons: Dialog.Ok | Dialog.Cancel
     width: Math.min(parent ? parent.width - 80 : 720, 720)
-    height: Math.min(parent ? parent.height - 80 : 520, 520)
+    height: Math.min(parent ? parent.height - 80 : 750, 750)
 
     ColumnLayout {
         anchors.fill: parent
