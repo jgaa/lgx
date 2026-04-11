@@ -50,6 +50,7 @@ Item {
 
     function registerWithWorkspace() {
         if (workspace) {
+            workspace.registerLeafView(root, nodeId, "marked")
             workspace.setActiveView(root, nodeId)
         }
     }
@@ -74,7 +75,12 @@ Item {
         acquireMarkedModel()
         registerWithWorkspace()
     }
-    Component.onDestruction: releaseMarkedModel()
+    Component.onDestruction: {
+        if (workspace) {
+            workspace.unregisterLeafView(root, nodeId)
+        }
+        releaseMarkedModel()
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -164,6 +170,12 @@ Item {
         sequences: ["PgDown"]
         enabled: root.activeFocus
         onActivated: root.scrollByPages(1)
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+L"]
+        enabled: root.activeFocus && !!root.workspace
+        onActivated: root.workspace.openGoToLineDialogInPrimaryLog()
     }
 
     Menu {

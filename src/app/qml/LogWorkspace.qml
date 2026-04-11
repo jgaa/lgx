@@ -5,8 +5,10 @@ Item {
     id: root
 
     property url sourceUrl
+    property var hostWindow: null
     property var activeView: null
     property int activeNodeId: -1
+    property int primaryLogNodeId: -1
     property var primaryLogView: null
     property int nextNodeId: 1
     property var layoutRoot: null
@@ -130,14 +132,57 @@ Item {
 
     function resetLayout() {
         nextNodeId = 1
+        primaryLogNodeId = -1
         primaryLogView = null
         activeView = null
         layoutRoot = createLeaf("log")
+        primaryLogNodeId = layoutRoot.id
         activeNodeId = layoutRoot.id
     }
 
-    function registerPrimaryLogView(view) {
-        primaryLogView = view
+    function registerLeafView(view, nodeId, viewType) {
+        if (viewType === "log" && nodeId === primaryLogNodeId) {
+            primaryLogView = view
+        }
+    }
+
+    function unregisterLeafView(view, nodeId) {
+        if (primaryLogView === view) {
+            primaryLogView = null
+        }
+    }
+
+    function findLogViewByNodeId(item, targetNodeId) {
+        if (!item || targetNodeId < 0) {
+            return null
+        }
+
+        if (item !== root && item.nodeId === targetNodeId && item.revealLinkedSourceRow) {
+            return item
+        }
+
+        if (!item.children || item.children.length === 0) {
+            return null
+        }
+
+        for (let index = 0; index < item.children.length; ++index) {
+            const found = findLogViewByNodeId(item.children[index], targetNodeId)
+            if (found) {
+                return found
+            }
+        }
+
+        return null
+    }
+
+    function resolvePrimaryLogView() {
+        const currentPrimary = findLogViewByNodeId(root, primaryLogNodeId)
+        if (currentPrimary) {
+            primaryLogView = currentPrimary
+            return currentPrimary
+        }
+
+        return primaryLogView
     }
 
     function setActiveView(view, nodeId) {
@@ -177,11 +222,25 @@ Item {
     }
 
     function revealSourceRowInPrimaryLog(sourceRow) {
-        if (!primaryLogView || sourceRow < 0) {
+        const targetView = resolvePrimaryLogView()
+        if (!targetView || sourceRow < 0) {
             return
         }
 
-        primaryLogView.revealSourceRow(sourceRow, !primaryLogView.following)
+        if (targetView.revealLinkedSourceRow) {
+            targetView.revealLinkedSourceRow(sourceRow)
+            return
+        }
+
+        targetView.revealSourceRow(sourceRow, !targetView.following)
+    }
+
+    function openGoToLineDialogInPrimaryLog() {
+        if (!resolvePrimaryLogView() || !hostWindow || !hostWindow.openGoToLineDialog) {
+            return
+        }
+
+        hostWindow.openGoToLineDialog()
     }
 
     function assignNode(loader, workspace, nodeData) {

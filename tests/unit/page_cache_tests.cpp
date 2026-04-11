@@ -258,6 +258,33 @@ TEST(PageCacheTests, ConfigChangeTriggersTrimming) {
   EXPECT_EQ(cache.snapshot().resident_entries, 1U);
 }
 
+TEST(PageCacheTests, SnapshotAndTrimRemainStableAfterRepeatedInvalidation) {
+  GlobalPageCache cache({.max_entries = 3, .max_bytes = 1024 * 1024});
+
+  std::vector<PageDataPtr> pinned_pages;
+  for (size_t index = 0; index < 8; ++index) {
+    const auto key = PageKey{13, index};
+    const auto page = QCoro::waitFor(cache.getOrLoad(key, [index]() -> QCoro::Task<PageDataPtr> {
+      co_return makePage("page-" + std::to_string(index) + "\n");
+    }));
+    ASSERT_TRUE(page);
+    if (index % 3 == 0) {
+      pinned_pages.push_back(page);
+    }
+
+    if (index > 0 && index % 2 == 0) {
+      cache.invalidate(PageKey{13, index - 1});
+    }
+
+    EXPECT_NO_THROW(static_cast<void>(cache.snapshot()));
+    EXPECT_NO_THROW(cache.trim());
+  }
+
+  pinned_pages.clear();
+  EXPECT_NO_THROW(cache.clearEvictable());
+  EXPECT_NO_THROW(static_cast<void>(cache.snapshot()));
+}
+
 TEST(PageCacheTests, PublishedSnapshotRemainsValidAfterInvalidation) {
   GlobalPageCache cache({.max_entries = 8, .max_bytes = 1024 * 1024});
   PageKey key{11, 0};

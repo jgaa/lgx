@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QFontDatabase>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QPointer>
@@ -20,6 +21,7 @@ namespace {
 
 constexpr auto kWindowWidthKey = "ui/window/width";
 constexpr auto kWindowHeightKey = "ui/window/height";
+constexpr auto kApplicationIconResource = ":/qt/qml/lgx/images/lgxicon.svg";
 constexpr auto kMaterialSymbolsFontResource = ":/qt/qml/lgx/qml/fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf";
 
 struct SavedWindowSize {
@@ -104,6 +106,7 @@ int main(int argc, char *argv[]) {
   QCoreApplication::setApplicationName(QStringLiteral("lgx-debug"));
 #endif
   QCoreApplication::setApplicationVersion(lgx::applicationVersion());
+  app.setWindowIcon(QIcon(QString::fromUtf8(kApplicationIconResource)));
 
   lgx::LoggingController loggingController;
   loggingController.initialize();
@@ -149,6 +152,7 @@ int main(int argc, char *argv[]) {
     restoreWindowSize(window, *saved_window_size);
   }
   if (window) {
+    window->setIcon(QIcon(QString::fromUtf8(kApplicationIconResource)));
     window->show();
   }
 

@@ -23,6 +23,7 @@ qt_add_qml_module(lgx_app
     qml/PreferencesDialog.qml
     qml/LogView.qml
   RESOURCES
+    ../../images/lgxicon.svg
     qml/fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf
     qml/icons/tabler/LICENSE.txt
     qml/icons/tabler/chevrons-down.svg
@@ -46,6 +47,7 @@ target_link_libraries(lgx_app
     Qt6::Widgets
     Qt6::Qml
     Qt6::Quick
+    Qt6::Svg
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

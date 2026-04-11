@@ -183,27 +183,63 @@ GlobalPageCache::Config GlobalPageCache::config() const noexcept {
 
 void GlobalPageCache::trim() {
   std::lock_guard lock(mutex_);
-  for (CacheEntry* cursor = lru_tail_; cursor != nullptr && overBudgetLocked();) {
-    CacheEntry* previous = cursor->lru_prev;
-    const auto it = entries_.find(cursor->key);
-    if (it != entries_.end() && it->second.get() == cursor && cursor->state == EntryState::Ready &&
-        cursor->page && cursor->page.use_count() == 1U) {
+  std::vector<PageKey> eviction_order;
+  eviction_order.reserve(entries_.size());
+  for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+    const auto& key = it->first;
+    const auto& entry = it->second;
+    if (entry && entry->state == EntryState::Ready && entry->page) {
+      eviction_order.push_back(key);
+    }
+  }
+
+  std::sort(eviction_order.begin(), eviction_order.end(), [this](const PageKey& lhs, const PageKey& rhs) {
+    const auto lhs_it = entries_.find(lhs);
+    const auto rhs_it = entries_.find(rhs);
+    const auto lhs_tick = lhs_it != entries_.end() && lhs_it->second ? lhs_it->second->last_request_tick : 0U;
+    const auto rhs_tick = rhs_it != entries_.end() && rhs_it->second ? rhs_it->second->last_request_tick : 0U;
+    return lhs_tick < rhs_tick;
+  });
+
+  for (const auto& key : eviction_order) {
+    if (!overBudgetLocked()) {
+      break;
+    }
+
+    const auto it = entries_.find(key);
+    if (it != entries_.end() && it->second && it->second->state == EntryState::Ready && it->second->page
+        && it->second->page.use_count() == 1U) {
       eraseReadyEntryLocked(it);
     }
-    cursor = previous;
   }
 }
 
 void GlobalPageCache::clearEvictable() {
   std::lock_guard lock(mutex_);
-  for (CacheEntry* cursor = lru_tail_; cursor != nullptr;) {
-    CacheEntry* previous = cursor->lru_prev;
-    const auto it = entries_.find(cursor->key);
-    if (it != entries_.end() && it->second.get() == cursor && cursor->state == EntryState::Ready &&
-        cursor->page && cursor->page.use_count() == 1U) {
+  std::vector<PageKey> eviction_order;
+  eviction_order.reserve(entries_.size());
+  for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+    const auto& key = it->first;
+    const auto& entry = it->second;
+    if (entry && entry->state == EntryState::Ready && entry->page) {
+      eviction_order.push_back(key);
+    }
+  }
+
+  std::sort(eviction_order.begin(), eviction_order.end(), [this](const PageKey& lhs, const PageKey& rhs) {
+    const auto lhs_it = entries_.find(lhs);
+    const auto rhs_it = entries_.find(rhs);
+    const auto lhs_tick = lhs_it != entries_.end() && lhs_it->second ? lhs_it->second->last_request_tick : 0U;
+    const auto rhs_tick = rhs_it != entries_.end() && rhs_it->second ? rhs_it->second->last_request_tick : 0U;
+    return lhs_tick < rhs_tick;
+  });
+
+  for (const auto& key : eviction_order) {
+    const auto it = entries_.find(key);
+    if (it != entries_.end() && it->second && it->second->state == EntryState::Ready && it->second->page
+        && it->second->page.use_count() == 1U) {
       eraseReadyEntryLocked(it);
     }
-    cursor = previous;
   }
 }
 
@@ -249,7 +285,20 @@ GlobalPageCache::Snapshot GlobalPageCache::snapshot() const {
   snapshot.config = config_;
   snapshot.resident_entries = resident_entries_;
   snapshot.resident_bytes = resident_bytes_;
-  for (auto* entry = lru_head_; entry != nullptr; entry = entry->lru_next) {
+  std::vector<const CacheEntry*> ordered_entries;
+  ordered_entries.reserve(entries_.size());
+  for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+    const auto& entry = it->second;
+    if (entry && entry->state == EntryState::Ready && entry->page) {
+      ordered_entries.push_back(entry.get());
+    }
+  }
+
+  std::sort(ordered_entries.begin(), ordered_entries.end(),
+            [](const CacheEntry* lhs, const CacheEntry* rhs) {
+              return lhs->last_request_tick > rhs->last_request_tick;
+            });
+  for (const auto* entry : ordered_entries) {
     snapshot.lru_order.push_back(entry->key);
   }
 

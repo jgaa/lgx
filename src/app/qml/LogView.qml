@@ -170,6 +170,18 @@ Item {
         return lineList.revealSourceRow(sourceRow, shouldScroll, ListView.Visible)
     }
 
+    function revealLinkedSourceRow(sourceRow) {
+        if (!logModel || sourceRow < 0 || sourceRow >= lineList.lineCount) {
+            return false
+        }
+
+        let revealed = false
+        performManualNavigation(function() {
+            revealed = lineList.selectSingleRow(sourceRow, ListView.Visible)
+        })
+        return revealed
+    }
+
     function goToLine(lineNumber) {
         if (!logModel || lineList.lineCount <= 0) {
             return false
@@ -251,7 +263,7 @@ Item {
             return
         }
 
-        workspace.registerPrimaryLogView(root)
+        workspace.registerLeafView(root, nodeId, "log")
         workspace.setActiveView(root, nodeId)
     }
 
@@ -298,8 +310,8 @@ Item {
         registerWithWorkspace()
     }
     Component.onDestruction: {
-        if (workspace && workspace.primaryLogView === root) {
-            workspace.primaryLogView = null
+        if (workspace) {
+            workspace.unregisterLeafView(root, nodeId)
         }
         releaseLogModel()
     }

@@ -455,7 +455,8 @@ QCoro::Task<PageDataPtr> GlobalPageCache::getOrLoad(PageKey key, Loader&& loader
     entry = it->second;
     if (entry->state == EntryState::Ready && entry->page) {
       noteRequestLocked(*entry);
-      co_return entry->page;
+      auto cached_page = entry->page;
+      co_return cached_page;
     }
 
     if (entry->state == EntryState::Loading && entry->load_state) {

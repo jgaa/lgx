@@ -91,7 +91,12 @@ ApplicationWindow {
     }
 
     function openGoToLineDialog() {
-        if (!activeLogView || activeLineCount <= 0) {
+        if (!activeWorkspace || activeLineCount <= 0) {
+            return
+        }
+
+        if (activeView && activeView !== activeLogView && activeWorkspace.openGoToLineDialogInPrimaryLog) {
+            activeWorkspace.openGoToLineDialogInPrimaryLog()
             return
         }
 
@@ -566,8 +571,8 @@ ApplicationWindow {
             MenuSeparator {}
 
             MenuItem {
-                text: qsTr("Goto Line")
-                enabled: !!window.activeLogView && window.activeLineCount > 0
+                text: qsTr("Goto line")
+                enabled: !!window.activeWorkspace && window.activeLineCount > 0
                 onTriggered: window.openGoToLineDialog()
             }
 
@@ -907,6 +912,7 @@ ApplicationWindow {
                         id: workspaceItem
                         anchors.fill: parent
                         sourceUrl: parent.sourceUrl
+                        hostWindow: window
                     }
                 }
             }
@@ -1410,7 +1416,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+L"
-        enabled: !!window.activeLogView && window.activeLineCount > 0
+        enabled: !!window.activeWorkspace && window.activeLineCount > 0
         onActivated: window.openGoToLineDialog()
     }
 

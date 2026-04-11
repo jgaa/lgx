@@ -1299,7 +1299,9 @@ void AppEngine::updateCurrentLogModel() {
   auto* previous_model = current_log_model_.data();
 
   current_open_log_source_url_ = canonical_next_source_url;
-  current_log_model_ = qobject_cast<LogModel*>(createLogModel(canonical_next_source_url));
+  current_log_model_ = canonical_next_source_url.isEmpty()
+      ? nullptr
+      : qobject_cast<LogModel*>(createLogModel(canonical_next_source_url));
   if (previous_model && previous_model != current_log_model_) {
     previous_model->setCurrent(false);
   }

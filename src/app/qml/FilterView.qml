@@ -75,6 +75,7 @@ Item {
 
     function registerWithWorkspace() {
         if (workspace) {
+            workspace.registerLeafView(root, nodeId, "filter")
             workspace.setActiveView(root, nodeId)
         }
     }
@@ -214,7 +215,12 @@ Item {
         acquireFilterModel()
         registerWithWorkspace()
     }
-    Component.onDestruction: releaseFilterModel()
+    Component.onDestruction: {
+        if (workspace) {
+            workspace.unregisterLeafView(root, nodeId)
+        }
+        releaseFilterModel()
+    }
 
     Connections {
         target: root.filterModel
@@ -442,6 +448,12 @@ Item {
         sequences: ["PgDown"]
         enabled: root.activeFocus
         onActivated: root.scrollByPages(1)
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+L"]
+        enabled: root.activeFocus && !!root.workspace
+        onActivated: root.workspace.openGoToLineDialogInPrimaryLog()
     }
 
     Menu {
