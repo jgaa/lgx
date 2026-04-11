@@ -42,6 +42,7 @@ class AppEngine : public QObject {
   Q_PROPERTY(QAbstractItemModel* recentPipeStreams READ recentPipeStreams CONSTANT)
   Q_PROPERTY(int recentPipeStreamCount READ recentPipeStreamCount NOTIFY recentPipeStreamsChanged)
   Q_PROPERTY(bool dockerAvailable READ dockerAvailable CONSTANT)
+  Q_PROPERTY(bool systemdAvailable READ systemdAvailable CONSTANT)
   Q_PROPERTY(QString adbExecutablePath READ adbExecutablePath WRITE setAdbExecutablePath NOTIFY adbExecutablePathChanged)
   Q_PROPERTY(bool adbAvailable READ adbAvailable NOTIFY adbAvailabilityChanged)
   Q_PROPERTY(QAbstractItemModel* adbCandidates READ adbCandidates CONSTANT)
@@ -77,6 +78,7 @@ class AppEngine : public QObject {
   [[nodiscard]] QAbstractItemModel* recentPipeStreams() noexcept;
   [[nodiscard]] int recentPipeStreamCount() const noexcept;
   [[nodiscard]] bool dockerAvailable() const noexcept;
+  [[nodiscard]] bool systemdAvailable() const noexcept;
   [[nodiscard]] QString adbExecutablePath() const noexcept;
   [[nodiscard]] bool adbAvailable() const noexcept;
   [[nodiscard]] QAbstractItemModel* adbCandidates() noexcept;
@@ -110,6 +112,8 @@ class AppEngine : public QObject {
   Q_INVOKABLE int openDockerContainerStream(const QString& container_id,
                                             const QString& container_name = {});
   Q_INVOKABLE int openAdbLogcatStream(const QString& serial, const QString& name = {});
+  Q_INVOKABLE int openSystemdJournalStream(const QString& process_name = {},
+                                           bool start_at_now = false);
   Q_INVOKABLE int scanAdbExecutables();
   Q_INVOKABLE bool refreshAdbDevices();
   Q_INVOKABLE bool refreshDockerContainers();
@@ -139,6 +143,7 @@ class AppEngine : public QObject {
   Q_INVOKABLE int activeLineMarkColor() const noexcept;
   Q_INVOKABLE bool cleanCache();
   Q_INVOKABLE QVariantList logcatProcessesForSource(const QUrl& url) const;
+  Q_INVOKABLE QVariantList systemdProcessesForSource(const QUrl& url) const;
   Q_INVOKABLE bool wrapLogLinesForSource(const QUrl& url) const;
   Q_INVOKABLE void saveWrapLogLinesForSource(const QUrl& url, bool enabled) const;
 

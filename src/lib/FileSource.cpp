@@ -691,6 +691,7 @@ SourceLines FileSource::collectLines(uint64_t first_line, size_t count) const {
       source_line.thread_id = std::string(sliceSpan(page->lineAt(page_local_index), parsed.thread_id));
       source_line.function_name =
           std::string(sliceSpan(page->lineAt(page_local_index), parsed.function_name));
+      source_line.message = std::string(sliceSpan(page->lineAt(page_local_index), parsed.message));
       if (parsed.has_timestamp) {
         source_line.timestamp =
             std::chrono::system_clock::time_point{std::chrono::milliseconds{

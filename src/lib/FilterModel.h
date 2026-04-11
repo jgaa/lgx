@@ -24,6 +24,7 @@ class FilterModel final : public QAbstractListModel {
   Q_PROPERTY(QString regexError READ regexError NOTIFY regexErrorChanged)
   Q_PROPERTY(QString scannerName READ scannerName NOTIFY scannerNameChanged)
   Q_PROPERTY(int selectedPid READ selectedPid WRITE setSelectedPid NOTIFY selectedPidChanged)
+  Q_PROPERTY(QString selectedProcessName READ selectedProcessName WRITE setSelectedProcessName NOTIFY selectedProcessNameChanged)
 
  public:
   enum Role {
@@ -44,6 +45,7 @@ class FilterModel final : public QAbstractListModel {
   Q_ENUM(Role)
 
   explicit FilterModel(LogModel* source_model, QObject* parent = nullptr);
+  ~FilterModel() override;
 
   [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
   [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -59,6 +61,7 @@ class FilterModel final : public QAbstractListModel {
   [[nodiscard]] QString regexError() const;
   [[nodiscard]] QString scannerName() const;
   [[nodiscard]] int selectedPid() const noexcept;
+  [[nodiscard]] QString selectedProcessName() const;
 
   Q_INVOKABLE QString plainTextAt(int row) const;
   Q_INVOKABLE int sourceRowAt(int row) const;
@@ -67,6 +70,7 @@ class FilterModel final : public QAbstractListModel {
   Q_INVOKABLE int logLevelAt(int row) const;
   Q_INVOKABLE int pidAt(int row) const;
   Q_INVOKABLE int tidAt(int row) const;
+  Q_INVOKABLE QVariantList systemdProcesses() const;
   Q_INVOKABLE bool markedAt(int row) const;
   Q_INVOKABLE int markColorAt(int row) const;
   Q_INVOKABLE bool toggleMarkAt(int row, int preferredColor = static_cast<int>(LineMark_Default));
@@ -74,12 +78,15 @@ class FilterModel final : public QAbstractListModel {
   Q_INVOKABLE void setLevelEnabled(int level, bool enabled);
   Q_INVOKABLE void refresh();
 
+  void prepareForRelease();
+
  public slots:
   void setPattern(const QString& pattern);
   void setRegex(bool enabled);
   void setCaseInsensitive(bool enabled);
   void setAutoRefresh(bool enabled);
   void setSelectedPid(int pid);
+  void setSelectedProcessName(const QString& name);
 
  signals:
   void patternChanged();
@@ -91,6 +98,7 @@ class FilterModel final : public QAbstractListModel {
   void levelsChanged();
   void scannerNameChanged();
   void selectedPidChanged();
+  void selectedProcessNameChanged();
 
  private:
   [[nodiscard]] bool matchesSourceRow(int source_row) const;
@@ -114,6 +122,7 @@ class FilterModel final : public QAbstractListModel {
   bool auto_refresh_{true};
   bool dirty_{false};
   int selected_pid_{0};
+  QString selected_process_name_;
 };
 
 }  // namespace lgx

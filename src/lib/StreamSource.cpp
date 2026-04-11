@@ -2,11 +2,28 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QDateTime>
+#include <QHash>
+#include <QFile>
 #include <QProcess>
+#include <QSocketNotifier>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUuid>
 #include <QUrlQuery>
+
+#ifdef LGX_ENABLE_SYSTEMD_SOURCE
+#include <systemd/sd-journal.h>
+#ifdef LOG_NOTICE
+#undef LOG_NOTICE
+#endif
+#ifdef LOG_INFO
+#undef LOG_INFO
+#endif
+#ifdef LOG_DEBUG
+#undef LOG_DEBUG
+#endif
+#endif
 
 #include "UiSettings.h"
 #include "logging.h"
@@ -18,6 +35,7 @@ namespace {
 constexpr auto kPipeScheme = "pipe";
 constexpr auto kDockerScheme = "docker";
 constexpr auto kAdbScheme = "adb";
+constexpr auto kSystemdScheme = "systemd";
 constexpr auto kSpoolFileName = "stream.log";
 constexpr auto kAppCacheRootName = "lgx";
 constexpr auto kSpoolDirName = "spool";
@@ -265,6 +283,260 @@ class AdbLogcatProvider final : public IStreamProvider {
   QString serial_;
 };
 
+#ifdef LGX_ENABLE_SYSTEMD_SOURCE
+class SystemdJournalProvider final : public IStreamProvider {
+ public:
+  explicit SystemdJournalProvider(QString process_name, bool start_at_now)
+      : process_name_(std::move(process_name)),
+        start_at_now_(start_at_now) {
+    drain_timer_.setSingleShot(true);
+    QObject::connect(&drain_timer_, &QTimer::timeout, &drain_timer_, [this]() {
+      drainAvailableEntries();
+    });
+    journal_poll_timer_.setInterval(250);
+    QObject::connect(&journal_poll_timer_, &QTimer::timeout, &journal_poll_timer_, [this]() {
+      processJournalChanges();
+    });
+  }
+
+  ~SystemdJournalProvider() override {
+    stop();
+  }
+
+  void setCallbacks(Callbacks callbacks) override {
+    callbacks_ = std::move(callbacks);
+  }
+
+  void start() override {
+    if (journal_) {
+      return;
+    }
+
+    sd_journal* journal = nullptr;
+    const int open_result = sd_journal_open(&journal, SD_JOURNAL_LOCAL_ONLY);
+    if (open_result < 0 || !journal) {
+      if (callbacks_.on_error) {
+        callbacks_.on_error(QObject::tr("Failed to open the systemd journal."));
+      }
+      return;
+    }
+    journal_ = journal;
+
+    if (!process_name_.trimmed().isEmpty()) {
+      const QByteArray comm_match = QStringLiteral("_COMM=%1").arg(process_name_.trimmed()).toUtf8();
+      const QByteArray ident_match =
+          QStringLiteral("SYSLOG_IDENTIFIER=%1").arg(process_name_.trimmed()).toUtf8();
+      sd_journal_add_match(journal_, comm_match.constData(), 0);
+      sd_journal_add_disjunction(journal_);
+      sd_journal_add_match(journal_, ident_match.constData(), 0);
+    }
+
+    const int seek_result = start_at_now_
+        ? sd_journal_seek_realtime_usec(journal_,
+                                        static_cast<uint64_t>(QDateTime::currentMSecsSinceEpoch())
+                                            * 1000U)
+        : sd_journal_seek_head(journal_);
+    if (seek_result < 0) {
+      if (callbacks_.on_error) {
+        callbacks_.on_error(QObject::tr("Failed to seek the systemd journal."));
+      }
+      stop();
+      return;
+    }
+    const int fd = sd_journal_get_fd(journal_);
+    if (fd < 0) {
+      if (callbacks_.on_error) {
+        callbacks_.on_error(QObject::tr("Failed to watch the systemd journal."));
+      }
+      stop();
+      return;
+    }
+
+    notifier_.reset(new QSocketNotifier(fd, QSocketNotifier::Read));
+    QObject::connect(notifier_.get(), &QSocketNotifier::activated, notifier_.get(), [this]() {
+      processJournalChanges();
+    });
+    journal_poll_timer_.start();
+    drain_timer_.start(0);
+  }
+
+  void stop() override {
+    callbacks_ = {};
+    drain_timer_.stop();
+    journal_poll_timer_.stop();
+    if (notifier_) {
+      QObject::disconnect(notifier_.get(), nullptr, notifier_.get(), nullptr);
+      notifier_.reset();
+    }
+    if (journal_) {
+      sd_journal_close(journal_);
+      journal_ = nullptr;
+    }
+  }
+
+ private:
+  static QByteArray journalField(sd_journal* journal, const char* key) {
+    const void* data = nullptr;
+    size_t size = 0;
+    if (sd_journal_get_data(journal, key, &data, &size) < 0 || !data || size == 0) {
+      return {};
+    }
+
+    QByteArray field(static_cast<const char*>(data), static_cast<qsizetype>(size));
+    const auto equals = field.indexOf('=');
+    if (equals < 0) {
+      return {};
+    }
+    field.remove(0, equals + 1);
+    return field;
+  }
+
+  static QByteArray displayField(QByteArray value) {
+    value.replace('\t', ' ');
+    value.replace('\r', "\\r");
+    value.replace('\n', "\\n");
+    return value;
+  }
+
+  static QByteArray priorityName(const QByteArray& priority) {
+    bool ok = false;
+    const auto value = priority.toUInt(&ok);
+    if (!ok) {
+      return "INFO";
+    }
+    if (value <= 3U) {
+      return "ERROR";
+    }
+    if (value == 4U) {
+      return "WARN";
+    }
+    if (value == 5U) {
+      return "NOTICE";
+    }
+    if (value == 7U) {
+      return "DEBUG";
+    }
+    return "INFO";
+  }
+
+  QByteArray processNameForPid(uint32_t pid) const {
+    if (pid == 0U) {
+      return {};
+    }
+    if (const auto cached = process_name_cache_.constFind(pid); cached != process_name_cache_.constEnd()) {
+      return cached.value();
+    }
+
+    QFile comm_file(QStringLiteral("/proc/%1/comm").arg(pid));
+    QByteArray name;
+    if (comm_file.open(QIODevice::ReadOnly)) {
+      name = comm_file.readLine().trimmed();
+    }
+    process_name_cache_.insert(pid, name);
+    return name;
+  }
+
+  QByteArray currentEntryLine() const {
+    uint64_t realtime_usecs = 0;
+    sd_journal_get_realtime_usec(journal_, &realtime_usecs);
+
+    const auto priority = journalField(journal_, "PRIORITY");
+    const auto message = journalField(journal_, "MESSAGE");
+    const auto pid_field = journalField(journal_, "_PID");
+    bool pid_ok = false;
+    const auto pid = pid_field.toUInt(&pid_ok);
+    QByteArray process = journalField(journal_, "_COMM");
+    if (process.isEmpty()) {
+      process = journalField(journal_, "SYSLOG_IDENTIFIER");
+    }
+    if (process.isEmpty() && pid_ok) {
+      process = processNameForPid(pid);
+    }
+
+    QByteArray process_label = displayField(process);
+    if (pid_ok && pid > 0U) {
+      process_label += '[';
+      process_label += QByteArray::number(pid);
+      process_label += ']';
+    } else if (process_label.isEmpty()) {
+      process_label = "unknown";
+    }
+
+    const auto timestamp =
+        QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(realtime_usecs / 1000U))
+            .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
+            .toUtf8();
+
+    QByteArray line;
+    line.reserve(128 + message.size());
+    line += timestamp;
+    line += ' ';
+    line += priorityName(priority);
+    line += ' ';
+    line += process_label;
+    line += ": ";
+    line += displayField(message);
+    line += '\n';
+    return line;
+  }
+
+  void drainAvailableEntries() {
+    if (!journal_) {
+      return;
+    }
+
+    QByteArray batch;
+    constexpr int kMaxEntriesPerDrain = 1000;
+    int drained_count = 0;
+    for (; drained_count < kMaxEntriesPerDrain; ++drained_count) {
+      const int next = sd_journal_next(journal_);
+      if (next < 0) {
+        if (callbacks_.on_error) {
+          callbacks_.on_error(QObject::tr("Failed to read the systemd journal."));
+        }
+        return;
+      }
+      if (next == 0) {
+        break;
+      }
+      batch += currentEntryLine();
+    }
+
+    if (!batch.isEmpty() && callbacks_.on_bytes) {
+      callbacks_.on_bytes(std::move(batch));
+    }
+
+    if (journal_ && drained_count == kMaxEntriesPerDrain) {
+      drain_timer_.start(0);
+    }
+  }
+
+  void processJournalChanges() {
+    if (!journal_) {
+      return;
+    }
+
+    const int process_result = sd_journal_process(journal_);
+    if (process_result < 0) {
+      if (callbacks_.on_error) {
+        callbacks_.on_error(QObject::tr("Failed to read changes from the systemd journal."));
+      }
+      return;
+    }
+    drainAvailableEntries();
+  }
+
+  QTimer drain_timer_;
+  QTimer journal_poll_timer_;
+  std::unique_ptr<QSocketNotifier> notifier_;
+  Callbacks callbacks_;
+  sd_journal* journal_{nullptr};
+  QString process_name_;
+  bool start_at_now_{false};
+  mutable QHash<uint32_t, QByteArray> process_name_cache_;
+};
+#endif
+
 }  // namespace
 
 StreamSource::StreamSource() {
@@ -283,7 +555,8 @@ bool StreamSource::isSupportedUrl(const QUrl& url) {
   const auto scheme = url.scheme();
   return scheme == QLatin1StringView{kPipeScheme}
       || scheme == QLatin1StringView{kDockerScheme}
-      || scheme == QLatin1StringView{kAdbScheme};
+      || scheme == QLatin1StringView{kAdbScheme}
+      || scheme == QLatin1StringView{kSystemdScheme};
 }
 
 QUrl StreamSource::makePipeUrl(const QString& command, bool include_stdout,
@@ -389,6 +662,41 @@ std::optional<AdbLogcatSpec> StreamSource::parseAdbLogcatSpec(const QUrl& url) {
   return spec;
 }
 
+QUrl StreamSource::makeSystemdJournalUrl(const QString& process_name, bool start_at_now) {
+  QUrl url;
+  url.setScheme(QLatin1StringView{kSystemdScheme});
+  url.setPath(QStringLiteral("/") + QUuid::createUuid().toString(QUuid::WithoutBraces));
+
+  const auto trimmed = process_name.trimmed();
+  if (!trimmed.isEmpty() || start_at_now) {
+    QUrlQuery query;
+    if (!trimmed.isEmpty()) {
+      query.addQueryItem(QStringLiteral("process"), trimmed);
+    }
+    if (start_at_now) {
+      query.addQueryItem(QStringLiteral("start"), QStringLiteral("now"));
+    }
+    url.setQuery(query);
+  }
+  return url;
+}
+
+std::optional<SystemdJournalSpec> StreamSource::parseSystemdJournalSpec(const QUrl& url) {
+  if (url.scheme() != QLatin1StringView{kSystemdScheme}) {
+    return std::nullopt;
+  }
+
+  const QUrlQuery query(url);
+  SystemdJournalSpec spec;
+  spec.instance_id = url.path();
+  if (spec.instance_id.startsWith(QLatin1Char('/'))) {
+    spec.instance_id.remove(0, 1);
+  }
+  spec.process_name = query.queryItemValue(QStringLiteral("process")).trimmed();
+  spec.start_at_now = query.queryItemValue(QStringLiteral("start")) == QStringLiteral("now");
+  return spec;
+}
+
 void StreamSource::setCallbacks(SourceCallbacks callbacks) {
   LogSource::setCallbacks(std::move(callbacks));
   spool_source_.setCallbacks(SourceCallbacks{
@@ -424,6 +732,10 @@ void StreamSource::open(const std::string& path) {
   if (url.scheme() == QLatin1StringView{kAdbScheme}
       && spool_source_.requestedScannerName() == "Auto") {
     spool_source_.setRequestedScannerName("Logcat");
+  }
+  if (url.scheme() == QLatin1StringView{kSystemdScheme}
+      && spool_source_.requestedScannerName() == "Auto") {
+    spool_source_.setRequestedScannerName("Systemd");
   }
   provider_ = createProvider(url);
   if (!provider_) {
@@ -571,6 +883,16 @@ std::unique_ptr<IStreamProvider> StreamSource::createProvider(const QUrl& url) {
   if (const auto adb_spec = parseAdbLogcatSpec(url); adb_spec.has_value()) {
     LOG_INFO << "Using adb logcat provider for serial='" << adb_spec->serial.toStdString() << "'";
     return std::make_unique<AdbLogcatProvider>(adb_spec->serial);
+  }
+  if (const auto systemd_spec = parseSystemdJournalSpec(url); systemd_spec.has_value()) {
+#ifdef LGX_ENABLE_SYSTEMD_SOURCE
+    LOG_INFO << "Using systemd journal provider";
+    return std::make_unique<SystemdJournalProvider>(systemd_spec->process_name,
+                                                    systemd_spec->start_at_now);
+#else
+    LOG_WARN << "Systemd journal provider requested but LGX_ENABLE_SYSTEMD_SOURCE is disabled";
+    return {};
+#endif
   }
 
   return {};

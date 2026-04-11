@@ -424,6 +424,30 @@ ApplicationWindow {
             }
 
             Menu {
+                title: qsTr("Systemd")
+                enabled: AppEngine.systemdAvailable
+
+                MenuItem {
+                    text: qsTr("Open Journal")
+                    onTriggered: {
+                        const openedIndex = AppEngine.openSystemdJournalStream("")
+                        if (openedIndex >= 0) {
+                            window.setCurrentTabIndex(openedIndex)
+                        }
+                    }
+                }
+                MenuItem {
+                    text: qsTr("Open Journal starting now")
+                    onTriggered: {
+                        const openedIndex = AppEngine.openSystemdJournalStream("", true)
+                        if (openedIndex >= 0) {
+                            window.setCurrentTabIndex(openedIndex)
+                        }
+                    }
+                }
+            }
+
+            Menu {
                 title: qsTr("Logcat")
                 enabled: AppEngine.adbAvailable
 
@@ -777,14 +801,16 @@ ApplicationWindow {
                     required property url sourceUrl
                     property var tabLogModel: null
                     readonly property string sourceScheme: sourceUrl ? sourceUrl.toString().split(":")[0] : ""
-                    readonly property bool isStreamSource: sourceScheme === "pipe" || sourceScheme === "docker" || sourceScheme === "adb"
+                    readonly property bool isStreamSource: sourceScheme === "pipe" || sourceScheme === "docker" || sourceScheme === "adb" || sourceScheme === "systemd"
                     readonly property url sourceIconSource: sourceScheme === "docker"
                                                            ? window.tablerIcon("packages")
                                                            : (sourceScheme === "pipe"
                                                               ? window.tablerIcon("terminal-2")
                                                               : (sourceScheme === "adb"
                                                                  ? window.tablerIcon("device-mobile")
-                                                                 : window.tablerIcon("file-text")))
+                                                                 : (sourceScheme === "systemd"
+                                                                    ? window.tablerIcon("terminal-2")
+                                                                    : window.tablerIcon("file-text"))))
 
                     padding: 0
                     width: implicitWidth
@@ -910,13 +936,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: AppEngine.dockerAvailable
-                          ? (AppEngine.adbAvailable
-                             ? qsTr("Open a log file from File/Open or a stream from Sources/Open Pipe Stream, Sources/Docker, or Sources/Logcat.")
-                             : qsTr("Open a log file from File/Open or a stream from Sources/Open Pipe Stream or Sources/Docker."))
-                          : (AppEngine.adbAvailable
-                             ? qsTr("Open a log file from File/Open or a stream from Sources/Open Pipe Stream or Sources/Logcat.")
-                             : qsTr("Open a log file from File/Open or a stream from Sources/Open Pipe Stream."))
+                    text: qsTr("Open a log file from File/Open or a stream from Sources.")
                     color: "#6c655c"
                 }
             }

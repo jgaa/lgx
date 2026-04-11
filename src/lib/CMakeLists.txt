@@ -59,3 +59,8 @@ target_link_libraries(lgx_lib
 if(LGX_BOOST_TARGET)
   target_link_libraries(lgx_lib PUBLIC "${LGX_BOOST_TARGET}")
 endif()
+
+if(LGX_ENABLE_SYSTEMD_SOURCE)
+  target_compile_definitions(lgx_lib PUBLIC LGX_ENABLE_SYSTEMD_SOURCE=1)
+  target_link_libraries(lgx_lib PUBLIC PkgConfig::SYSTEMD)
+endif()

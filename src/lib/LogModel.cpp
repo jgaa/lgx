@@ -144,6 +144,14 @@ int LogModel::lineNoAt(int row) const {
   return static_cast<int>(rows_[static_cast<size_t>(row)].line_no);
 }
 
+QString LogModel::functionNameAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return {};
+  }
+
+  return rows_[static_cast<size_t>(row)].function_name;
+}
+
 int LogModel::logLevelAt(int row) const {
   if (row < 0 || row >= rowCount()) {
     return static_cast<int>(LogLevel_Info);

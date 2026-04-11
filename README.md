@@ -24,7 +24,7 @@ switching mental models.
 Interesting features already implemented include:
 
 * Open multiple logs at once in tabs.
-* Open local files, pipe streams, Docker container logs, and Android `logcat`
+* Open local files, pipe streams, Systemd journal, Docker container logs, and Android `logcat`
   streams.
 * Treat streams like normal logs: they can be followed, navigated, filtered,
   marked, and reopened from recent history.
@@ -163,12 +163,24 @@ Current shortcuts and gestures:
 * plain mouse wheel scrolls the log view.
 * dragging the vertical or horizontal scrollbar works as expected for manual
   navigation.
+* double-click on the status bar's zoom value changes it to 100%.
 
 Behavior worth knowing:
 
 * scrolling upward manually disables follow mode
 * wrapping disables horizontal scrolling because the view becomes line-wrapped
 * `Copy` works on the current selection from the active log view
+
+## Systemd
+
+If you want access to system logs, not just your own users log events, 
+you must add yourself to the appropriate group:
+
+```sh
+sudo usermod -aG systemd-journal $USER
+```
+
+Then log out and back in.
 
 ## Status:
 

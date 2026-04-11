@@ -17,6 +17,12 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 option(LGX_ENABLE_TESTS "Build tests and enable CTest integration" OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(LGX_ENABLE_SYSTEMD_SOURCE_DEFAULT ON)
+else()
+  set(LGX_ENABLE_SYSTEMD_SOURCE_DEFAULT OFF)
+endif()
+option(LGX_ENABLE_SYSTEMD_SOURCE "Build the systemd journal stream source" ${LGX_ENABLE_SYSTEMD_SOURCE_DEFAULT})
 
 set(BUILD_TESTING ${LGX_ENABLE_TESTS} CACHE BOOL "Build tests" FORCE)
 set(QCORO_WITH_QTDBUS OFF CACHE BOOL "" FORCE)
@@ -58,6 +64,10 @@ endif()
 
 find_package(Boost REQUIRED)
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core Quick Qml Widgets)
+if(LGX_ENABLE_SYSTEMD_SOURCE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+endif()
 
 qt_standard_project_setup(REQUIRES 6.10)
 

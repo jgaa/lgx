@@ -118,6 +118,7 @@ TEST(AppEngineTests, LogModelResetsOnSourceReset) {
   file.close();
 
   LogModel model(QUrl::fromLocalFile(path));
+  model.setCurrent(true);
   auto source = std::make_unique<FileSource>();
   source->open(path.toStdString());
   model.setSource(std::move(source));
@@ -295,6 +296,43 @@ TEST(AppEngineTests, ListsDistinctLogcatProcessesForCurrentSource) {
   EXPECT_EQ(processes.at(1).toMap().value(QStringLiteral("pid")).toInt(), 1111);
   EXPECT_EQ(processes.at(2).toMap().value(QStringLiteral("pid")).toInt(), 3333);
   engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, ListsDistinctSystemdProcessesAlphabeticallyForCurrentSource) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("journal.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("__REALTIME_TIMESTAMP=1712067163821000\tPRIORITY=6\t_COMM=zeta\tMESSAGE=last\n"
+                       "__REALTIME_TIMESTAMP=1712067164821000\tPRIORITY=4\t_COMM=alpha\tMESSAGE=first\n"
+                       "__REALTIME_TIMESTAMP=1712067165821000\tPRIORITY=6\tSYSLOG_IDENTIFIER=Beta\tMESSAGE=middle\n"
+                       "__REALTIME_TIMESTAMP=1712067166821000\tPRIORITY=6\t_COMM=alpha\tMESSAGE=again\n"),
+            0);
+  file.close();
+
+  AppEngine engine;
+  const auto url = QUrl::fromLocalFile(path);
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+  ASSERT_NE(model, nullptr);
+  model->setRequestedScannerName(QStringLiteral("Systemd"));
+
+  const auto processes = engine.systemdProcessesForSource(url);
+  ASSERT_EQ(processes.size(), 4);
+  EXPECT_EQ(processes.at(0).toMap().value(QStringLiteral("name")).toString(), QString{});
+  EXPECT_EQ(processes.at(1).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("alpha"));
+  EXPECT_EQ(processes.at(2).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("Beta"));
+  EXPECT_EQ(processes.at(3).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("zeta"));
+  engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, SystemdJournalUrlPreservesStartAtNowMode) {
+  const auto url = StreamSource::makeSystemdJournalUrl(QStringLiteral("glogg"), true);
+  const auto spec = StreamSource::parseSystemdJournalSpec(url);
+  ASSERT_TRUE(spec.has_value());
+  EXPECT_EQ(spec->process_name, QStringLiteral("glogg"));
+  EXPECT_TRUE(spec->start_at_now);
 }
 
 TEST(AppEngineTests, AppliesLogcatScannerToAdbLogcatSources) {

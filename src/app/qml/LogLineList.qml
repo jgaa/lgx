@@ -120,6 +120,25 @@ Item {
         return Qt.darker(levelBackgroundColor(logLevel), 1.12)
     }
 
+    function levelLabel(logLevel) {
+        switch (logLevel) {
+        case 0:
+            return qsTr("ERROR")
+        case 1:
+            return qsTr("WARN")
+        case 2:
+            return qsTr("NOTICE")
+        case 3:
+            return qsTr("INFO")
+        case 4:
+            return qsTr("DEBUG")
+        case 5:
+            return qsTr("TRACE")
+        default:
+            return ""
+        }
+    }
+
     function setSelectedRows(entries) {
         const map = {}
         const indexes = []
@@ -649,8 +668,15 @@ Item {
                 required property int logLevel
                 required property bool marked
                 required property int markColor
+                required property date date
                 readonly property int rowFontPixelSize: UiSettings.effectiveLogFontPixelSize
                 readonly property real intrinsicRowWidth: contentRow.implicitWidth + gutter.width + 18
+                readonly property bool hasTimestamp: date && date.toString().length > 0
+                readonly property bool showLevelBadge: !!root.rowModel
+                    && root.rowModel.scannerName !== "None"
+                readonly property string formattedTimestamp: hasTimestamp
+                    ? date.toString("yyyy-MM-dd HH:mm:ss.zzz")
+                    : ""
 
                 width: ListView.view
                     ? (root.wrapLogLines
@@ -725,11 +751,50 @@ Item {
                             renderType: Text.NativeRendering
                         }
 
+                        Rectangle {
+                            id: levelBadge
+                            visible: rowDelegate.showLevelBadge
+                            radius: 4
+                            color: Qt.darker(root.levelBackgroundColor(logLevel), 1.08)
+                            border.width: 1
+                            border.color: Qt.darker(root.levelForegroundColor(logLevel), 1.05)
+                            implicitWidth: levelBadgeLabel.implicitWidth + 10
+                            implicitHeight: Math.max(rowFontPixelSize, levelBadgeLabel.implicitHeight + 4)
+
+                            Label {
+                                id: levelBadgeLabel
+                                anchors.centerIn: parent
+                                text: root.levelLabel(logLevel)
+                                color: root.levelForegroundColor(logLevel)
+                                font.family: UiSettings.logFontFamily
+                                font.pixelSize: Math.max(10, rowFontPixelSize - 1)
+                                font.bold: true
+                                renderType: Text.NativeRendering
+                            }
+                        }
+
+                        Label {
+                            id: timestampLabel
+                            visible: rowDelegate.hasTimestamp
+                            text: rowDelegate.formattedTimestamp
+                            color: Qt.darker(root.levelForegroundColor(logLevel), 1.05)
+                            font.family: UiSettings.logFontFamily
+                            font.pixelSize: rowFontPixelSize
+                            renderType: Text.NativeRendering
+                        }
+
                         Label {
                             id: messageLabel
                             text: message.length > 0 ? message : rawMessage
                             width: root.wrapLogLines
-                                ? Math.max(0, contentArea.width - lineNumberLabel.implicitWidth - contentRow.spacing - 12)
+                                ? Math.max(0, contentArea.width
+                                              - lineNumberLabel.implicitWidth
+                                              - (levelBadge.visible ? levelBadge.implicitWidth : 0)
+                                              - (timestampLabel.visible ? timestampLabel.implicitWidth : 0)
+                                              - (contentRow.spacing * ((levelBadge.visible ? 1 : 0)
+                                                                       + (timestampLabel.visible ? 1 : 0)
+                                                                       + 1))
+                                              - 12)
                                 : implicitWidth
                             wrapMode: root.wrapLogLines ? Text.WrapAtWordBoundaryOrAnywhere : Text.NoWrap
                             elide: root.wrapLogLines ? Text.ElideNone : Text.ElideLeft

@@ -18,8 +18,11 @@ Item {
     property int pendingTopSourceRow: -1
     readonly property bool hasSelection: lineList.hasSelection
     readonly property string selectedText: lineList.selectedText
-    readonly property bool supportsProcessFilter: !!filterModel && filterModel.scannerName === "Logcat"
-    readonly property int selectedProcessIndex: processIndexForPid(filterModel ? filterModel.selectedPid : 0)
+    readonly property bool supportsProcessFilter: !!filterModel && (filterModel.scannerName === "Logcat" || filterModel.scannerName === "Systemd")
+    readonly property bool usesProcessNameFilter: !!filterModel && filterModel.scannerName === "Systemd"
+    readonly property int selectedProcessIndex: usesProcessNameFilter
+                                                ? processIndexForName(filterModel ? filterModel.selectedProcessName : "")
+                                                : processIndexForPid(filterModel ? filterModel.selectedPid : 0)
     readonly property var levelDefinitions: [
         { level: 0, label: qsTr("Error") },
         { level: 1, label: qsTr("Warning") },
@@ -54,6 +57,7 @@ Item {
             return
         }
 
+        processRefreshTimer.stop()
         processCombo.popup.close()
         const modelToRelease = claimedFilterModel
         claimedFilterModel = null
@@ -112,15 +116,34 @@ Item {
         return 0
     }
 
+    function processIndexForName(name) {
+        for (let index = 0; index < processOptions.length; ++index) {
+            if (processOptions[index].name === name) {
+                return index
+            }
+        }
+        return 0
+    }
+
     function refreshProcessOptions() {
-        if (!supportsProcessFilter || !sourceUrl || sourceUrl.toString().length === 0) {
+        if (!filterModel || !supportsProcessFilter || !sourceUrl || sourceUrl.toString().length === 0) {
             processOptions = defaultProcessOptions()
             return
         }
 
-        processOptions = AppEngine.logcatProcessesForSource(sourceUrl)
+        processOptions = usesProcessNameFilter
+                         ? filterModel.systemdProcesses()
+                         : AppEngine.logcatProcessesForSource(sourceUrl)
         if (!processOptions || processOptions.length === 0) {
             processOptions = defaultProcessOptions()
+        }
+    }
+
+    function scheduleProcessOptionsRefresh() {
+        if (supportsProcessFilter) {
+            if (!processRefreshTimer.running) {
+                processRefreshTimer.start()
+            }
         }
     }
 
@@ -201,8 +224,24 @@ Item {
         }
 
         function onModelReset() {
+            root.scheduleProcessOptionsRefresh()
             Qt.callLater(root.restoreScrollPositionAfterRefresh)
         }
+
+        function onRowsInserted(parent, first, last) {
+            root.scheduleProcessOptionsRefresh()
+        }
+
+        function onRowsRemoved(parent, first, last) {
+            root.scheduleProcessOptionsRefresh()
+        }
+    }
+
+    Timer {
+        id: processRefreshTimer
+        interval: 40
+        repeat: false
+        onTriggered: root.refreshProcessOptions()
     }
 
     Rectangle {
@@ -242,7 +281,13 @@ Item {
                     currentIndex: root.selectedProcessIndex
                     onActivated: {
                         if (root.filterModel && currentIndex >= 0 && currentIndex < root.processOptions.length) {
-                            root.filterModel.selectedPid = root.processOptions[currentIndex].pid
+                            if (root.usesProcessNameFilter) {
+                                root.filterModel.selectedProcessName = root.processOptions[currentIndex].name
+                                root.filterModel.selectedPid = 0
+                            } else {
+                                root.filterModel.selectedPid = root.processOptions[currentIndex].pid
+                                root.filterModel.selectedProcessName = ""
+                            }
                         }
                     }
                 }

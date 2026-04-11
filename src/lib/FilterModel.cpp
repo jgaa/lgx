@@ -2,6 +2,9 @@
 
 #include <algorithm>
 
+#include <QSet>
+#include <QVariantMap>
+
 namespace lgx {
 
 FilterModel::FilterModel(LogModel* source_model, QObject* parent)
@@ -36,6 +39,10 @@ FilterModel::FilterModel(LogModel* source_model, QObject* parent)
   rebuildFilter();
 }
 
+FilterModel::~FilterModel() {
+  prepareForRelease();
+}
+
 int FilterModel::rowCount(const QModelIndex& parent) const {
   if (parent.isValid()) {
     return 0;
@@ -54,7 +61,7 @@ QVariant FilterModel::data(const QModelIndex& index, int role) const {
 }
 
 QHash<int, QByteArray> FilterModel::roleNames() const {
-  return {
+  static const QHash<int, QByteArray> roles{
       {SourceRowRole, "sourceRow"},
       {LineNoRole, "lineNo"},
       {FunctionNameRole, "functionName"},
@@ -69,6 +76,7 @@ QHash<int, QByteArray> FilterModel::roleNames() const {
       {PidRole, "pid"},
       {TidRole, "tid"},
   };
+  return roles;
 }
 
 QObject* FilterModel::sourceModelObject() const noexcept {
@@ -109,6 +117,10 @@ QString FilterModel::scannerName() const {
 
 int FilterModel::selectedPid() const noexcept {
   return selected_pid_;
+}
+
+QString FilterModel::selectedProcessName() const {
+  return selected_process_name_;
 }
 
 QString FilterModel::plainTextAt(int row) const {
@@ -177,6 +189,57 @@ int FilterModel::tidAt(int row) const {
   return source_row >= 0 ? source_model_->tidAt(source_row) : 0;
 }
 
+QVariantList FilterModel::systemdProcesses() const {
+  QVariantList entries;
+  QVariantMap all_entry;
+  all_entry.insert(QStringLiteral("pid"), 0);
+  all_entry.insert(QStringLiteral("name"), QString{});
+  all_entry.insert(QStringLiteral("label"), tr("All processes"));
+  entries.push_back(all_entry);
+
+  if (!source_model_) {
+    return entries;
+  }
+
+  QSet<QString> active_processes;
+  for (int row = 0; row < source_model_->rowCount(); ++row) {
+    const auto name = source_model_->functionNameAt(row).trimmed();
+    if (!name.isEmpty()) {
+      active_processes.insert(name);
+    }
+  }
+
+  if (auto* source = source_model_->source()) {
+    const auto snapshot = source->snapshot();
+    source->fetchLines(0, static_cast<size_t>(snapshot.line_count),
+                       [&active_processes](SourceLines lines) {
+                         for (const auto& line : lines.lines) {
+                           const auto name = QString::fromStdString(line.function_name).trimmed();
+                           if (!name.isEmpty()) {
+                             active_processes.insert(name);
+                           }
+                         }
+                       });
+  }
+
+  QStringList names;
+  names.reserve(active_processes.size());
+  for (const auto& name : active_processes) {
+    names.push_back(name);
+  }
+  names.sort(Qt::CaseInsensitive);
+
+  for (const auto& name : names) {
+    QVariantMap entry;
+    entry.insert(QStringLiteral("pid"), 0);
+    entry.insert(QStringLiteral("name"), name);
+    entry.insert(QStringLiteral("label"), name);
+    entries.push_back(entry);
+  }
+
+  return entries;
+}
+
 bool FilterModel::markedAt(int row) const {
   if (!source_model_) {
     return false;
@@ -234,6 +297,14 @@ void FilterModel::setLevelEnabled(int level, bool enabled) {
 void FilterModel::refresh() {
   refresh_timer_.stop();
   rebuildFilter();
+}
+
+void FilterModel::prepareForRelease() {
+  refresh_timer_.stop();
+  if (source_model_) {
+    disconnect(source_model_, nullptr, this, nullptr);
+    source_model_ = nullptr;
+  }
 }
 
 void FilterModel::setPattern(const QString& pattern) {
@@ -308,6 +379,21 @@ void FilterModel::setSelectedPid(int pid) {
   }
 }
 
+void FilterModel::setSelectedProcessName(const QString& name) {
+  const auto normalized = name.trimmed();
+  if (selected_process_name_ == normalized) {
+    return;
+  }
+
+  selected_process_name_ = normalized;
+  emit selectedProcessNameChanged();
+  if (auto_refresh_) {
+    scheduleRefresh();
+  } else {
+    markDirty();
+  }
+}
+
 bool FilterModel::matchesSourceRow(int source_row) const {
   if (!source_model_ || source_row < 0 || source_row >= source_model_->rowCount()) {
     return false;
@@ -322,11 +408,18 @@ bool FilterModel::matchesSourceRow(int source_row) const {
   }
 
   const bool has_text_filter = !pattern_.isEmpty();
-  if (!any_level_enabled && !has_text_filter && selected_pid_ == 0) {
-    return false;
+  if (!any_level_enabled && !has_text_filter && selected_pid_ == 0
+      && selected_process_name_.isEmpty()) {
+    return true;
   }
 
   if (selected_pid_ > 0 && source_model_->pidAt(source_row) != selected_pid_) {
+    return false;
+  }
+
+  if (!selected_process_name_.isEmpty()
+      && QString::compare(source_model_->functionNameAt(source_row),
+                          selected_process_name_, Qt::CaseSensitive) != 0) {
     return false;
   }
 
@@ -390,7 +483,8 @@ void FilterModel::rebuildFilter() {
     }
 
     const bool has_text_filter = !pattern_.isEmpty();
-    if (any_level_enabled && !has_text_filter && selected_pid_ == 0) {
+    if (any_level_enabled && !has_text_filter && selected_pid_ == 0
+        && selected_process_name_.isEmpty()) {
       QVector<int> next_source_rows;
       next_source_rows.reserve(enabled_levels.size());
       for (int level : enabled_levels) {
@@ -473,7 +567,8 @@ void FilterModel::onSourceDataChanged(int first_row, int last_row, const QList<i
     if (role == LogModel::MarkedRole || role == LogModel::MarkColorRole) {
       affects_marks = true;
     }
-    if (role == LogModel::LogLevelRole || role == LogModel::MessageRole || role == LogModel::RawMessageRole) {
+    if (role == LogModel::LogLevelRole || role == LogModel::MessageRole
+        || role == LogModel::RawMessageRole || role == LogModel::FunctionNameRole) {
       affects_filter = true;
     }
   }

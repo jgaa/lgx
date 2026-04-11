@@ -444,6 +444,14 @@ bool AppEngine::dockerAvailable() const noexcept {
   return !docker_executable_.isEmpty();
 }
 
+bool AppEngine::systemdAvailable() const noexcept {
+#ifdef LGX_ENABLE_SYSTEMD_SOURCE
+  return true;
+#else
+  return false;
+#endif
+}
+
 QString AppEngine::adbExecutablePath() const noexcept {
   return UiSettings::instance().adbExecutablePath();
 }
@@ -578,6 +586,21 @@ int AppEngine::openAdbLogcatStream(const QString& serial, const QString& name) {
   LOG_INFO << "Created ADB logcat URL: " << url.toString().toStdString();
   const auto index = openLogSourceInternal(url, false);
   LOG_INFO << "ADB logcat open result index=" << index;
+  return index;
+}
+
+int AppEngine::openSystemdJournalStream(const QString& process_name, bool start_at_now) {
+  LOG_INFO << "Request to open systemd journal stream for process='"
+           << process_name.trimmed().toStdString() << "' start_at_now=" << start_at_now;
+  if (!systemdAvailable()) {
+    LOG_WARN << "Rejecting systemd journal open request because support is disabled";
+    return -1;
+  }
+
+  const auto url = StreamSource::makeSystemdJournalUrl(process_name.trimmed(), start_at_now);
+  LOG_INFO << "Created systemd journal URL: " << url.toString().toStdString();
+  const auto index = openLogSourceInternal(url, false);
+  LOG_INFO << "Systemd journal open result index=" << index;
   return index;
 }
 
@@ -1024,6 +1047,64 @@ QVariantList AppEngine::logcatProcessesForSource(const QUrl& url) const {
   return entries;
 }
 
+QVariantList AppEngine::systemdProcessesForSource(const QUrl& url) const {
+  QVariantList entries;
+  QVariantMap all_entry;
+  all_entry.insert(QStringLiteral("pid"), 0);
+  all_entry.insert(QStringLiteral("name"), QString{});
+  all_entry.insert(QStringLiteral("label"), tr("All processes"));
+  entries.push_back(all_entry);
+
+  const auto canonical = canonicalUrl(url);
+  auto* model = modelForUrl(canonical);
+  if (!model) {
+    return entries;
+  }
+  const bool systemd_scanner =
+      model->scannerName() == QStringLiteral("Systemd")
+      || model->requestedScannerName() == QStringLiteral("Systemd");
+  if (!systemd_scanner) {
+    return entries;
+  }
+
+  QSet<QString> active_processes;
+  for (int row = 0; row < model->rowCount(); ++row) {
+    const auto name = model->functionNameAt(row).trimmed();
+    if (!name.isEmpty()) {
+      active_processes.insert(name);
+    }
+  }
+
+  if (auto* source = model->source()) {
+    const auto snapshot = source->snapshot();
+    source->fetchLines(0, static_cast<size_t>(snapshot.line_count),
+                       [&active_processes](SourceLines lines) {
+                         for (const auto& line : lines.lines) {
+                           const auto name = QString::fromStdString(line.function_name).trimmed();
+                           if (!name.isEmpty()) {
+                             active_processes.insert(name);
+                           }
+                         }
+                       });
+  }
+
+  QStringList names;
+  names.reserve(active_processes.size());
+  for (const auto& name : active_processes) {
+    names.push_back(name);
+  }
+  names.sort(Qt::CaseInsensitive);
+  for (const auto& name : names) {
+    QVariantMap entry;
+    entry.insert(QStringLiteral("pid"), 0);
+    entry.insert(QStringLiteral("name"), name);
+    entry.insert(QStringLiteral("label"), name);
+    entries.push_back(entry);
+  }
+
+  return entries;
+}
+
 bool AppEngine::wrapLogLinesForSource(const QUrl& url) const {
   bool found = false;
   const bool saved_value = savedLogSourceWrapLogLines(url, &found);
@@ -1095,6 +1176,8 @@ QObject* AppEngine::createLogModel(const QUrl& url) {
     auto source = std::make_unique<StreamSource>();
     if (canonical.scheme() == QStringLiteral("adb")) {
       source->setRequestedScannerName("Logcat");
+    } else if (canonical.scheme() == QStringLiteral("systemd")) {
+      source->setRequestedScannerName("Systemd");
     } else if (const auto saved_scanner_name = savedLogSourceScannerName(canonical);
                !saved_scanner_name.isEmpty()) {
       source->setRequestedScannerName(saved_scanner_name.toStdString());
@@ -1164,6 +1247,7 @@ void AppEngine::releaseFilterModel(QObject* model) {
   }
 
   const QUrl source_url = filter_model->sourceUrl();
+  filter_model->prepareForRelease();
   filter_model->deleteLater();
   releaseLogModel(source_url);
 }
@@ -1310,6 +1394,16 @@ QString AppEngine::titleForUrl(const QUrl& url) {
     const auto label = adb_spec->name.isEmpty() ? adb_spec->serial : adb_spec->name;
     return QObject::tr("Logcat: %1").arg(label);
   }
+  if (const auto systemd_spec = StreamSource::parseSystemdJournalSpec(url); systemd_spec.has_value()) {
+    if (systemd_spec->process_name.isEmpty()) {
+      return systemd_spec->start_at_now
+          ? QObject::tr("Systemd journal (from now)")
+          : QObject::tr("Systemd journal");
+    }
+    return systemd_spec->start_at_now
+        ? QObject::tr("Systemd: %1 (from now)").arg(systemd_spec->process_name)
+        : QObject::tr("Systemd: %1").arg(systemd_spec->process_name);
+  }
 
   if (url.isLocalFile()) {
     const QFileInfo file_info(url.toLocalFile());
@@ -1349,6 +1443,16 @@ QString AppEngine::displaySourceForUrl(const QUrl& url) {
   if (const auto adb_spec = StreamSource::parseAdbLogcatSpec(url); adb_spec.has_value()) {
     const auto label = adb_spec->name.isEmpty() ? adb_spec->serial : adb_spec->name;
     return QObject::tr("ADB logcat %1 (%2)").arg(label, adb_spec->serial);
+  }
+  if (const auto systemd_spec = StreamSource::parseSystemdJournalSpec(url); systemd_spec.has_value()) {
+    if (systemd_spec->process_name.isEmpty()) {
+      return systemd_spec->start_at_now
+          ? QObject::tr("Systemd journal starting now")
+          : QObject::tr("Systemd journal");
+    }
+    return systemd_spec->start_at_now
+        ? QObject::tr("Systemd journal starting now filtered by %1").arg(systemd_spec->process_name)
+        : QObject::tr("Systemd journal filtered by %1").arg(systemd_spec->process_name);
   }
 
   if (url.isLocalFile()) {

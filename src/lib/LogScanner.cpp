@@ -597,6 +597,310 @@ struct GenericLevelMatch {
   return parsed;
 }
 
+[[nodiscard]] LogLevel parseSystemdPriority(std::string_view token) noexcept {
+  const auto priority = parseUnsignedToken(token);
+  if (!priority) {
+    return LogLevel_Info;
+  }
+
+  if (*priority <= 3U) {
+    return LogLevel_Error;
+  }
+  if (*priority == 4U) {
+    return LogLevel_Warn;
+  }
+  if (*priority == 5U) {
+    return LogLevel_Notice;
+  }
+  if (*priority == 7U) {
+    return LogLevel_Debug;
+  }
+  return LogLevel_Info;
+}
+
+[[nodiscard]] std::optional<int> monthNumber(std::string_view token) noexcept {
+  if (token.size() != 3U) {
+    return std::nullopt;
+  }
+
+  constexpr std::array months{
+      "Jan"sv, "Feb"sv, "Mar"sv, "Apr"sv, "May"sv, "Jun"sv,
+      "Jul"sv, "Aug"sv, "Sep"sv, "Oct"sv, "Nov"sv, "Dec"sv};
+  for (size_t index = 0; index < months.size(); ++index) {
+    if (equalsIgnoreCase(token, months[index])) {
+      return static_cast<int>(index + 1U);
+    }
+  }
+  return std::nullopt;
+}
+
+struct SystemdShortPrefix {
+  int64_t msecs_since_epoch{};
+  size_t process_start{};
+  size_t process_end{};
+  size_t message_start{};
+  uint32_t pid{};
+};
+
+struct SystemdFriendlyPrefix {
+  int64_t msecs_since_epoch{};
+  LogLevel level{LogLevel_Info};
+  size_t process_start{};
+  size_t process_end{};
+  size_t message_start{};
+  uint32_t pid{};
+};
+
+[[nodiscard]] std::optional<SystemdFriendlyPrefix> parseSystemdFriendlyPrefix(
+    std::string_view line) noexcept {
+  const auto timestamp = parseGenericTimestampPrefix(line);
+  if (!timestamp || timestamp->parsed_length >= line.size()) {
+    return std::nullopt;
+  }
+
+  const auto level_token = nextToken(line, timestamp->parsed_length);
+  if (!level_token) {
+    return std::nullopt;
+  }
+  const auto level =
+      parseGenericLevelWord(line.substr(level_token->first, level_token->second - level_token->first));
+  if (!level) {
+    return std::nullopt;
+  }
+
+  size_t cursor = level_token->second;
+  while (cursor < line.size() && line[cursor] == ' ') {
+    ++cursor;
+  }
+  const auto colon = line.find(':', cursor);
+  if (colon == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  size_t process_start = cursor;
+  size_t process_end = colon;
+  uint32_t pid = 0;
+  if (process_end > process_start && line[process_end - 1U] == ']') {
+    const auto bracket = line.rfind('[', process_end - 1U);
+    if (bracket != std::string_view::npos && bracket > process_start) {
+      if (const auto parsed_pid = parseUnsignedToken(line.substr(bracket + 1U,
+                                                                 process_end - bracket - 2U))) {
+        pid = *parsed_pid;
+        process_end = bracket;
+      }
+    }
+  }
+
+  if (process_end <= process_start) {
+    return std::nullopt;
+  }
+
+  size_t message_start = colon + 1U;
+  while (message_start < line.size() && line[message_start] == ' ') {
+    ++message_start;
+  }
+
+  return SystemdFriendlyPrefix{
+      .msecs_since_epoch = timestamp->msecs_since_epoch,
+      .level = *level,
+      .process_start = process_start,
+      .process_end = process_end,
+      .message_start = message_start,
+      .pid = pid,
+  };
+}
+
+[[nodiscard]] std::optional<SystemdShortPrefix> parseSystemdShortPrefix(
+    std::string_view line) noexcept {
+  if (line.size() < 16U) {
+    return std::nullopt;
+  }
+
+  const auto month = monthNumber(line.substr(0, 3));
+  if (!month || line[3] != ' ') {
+    return std::nullopt;
+  }
+
+  size_t cursor = 4;
+  while (cursor < line.size() && line[cursor] == ' ') {
+    ++cursor;
+  }
+
+  int day = 0;
+  if (!parseFixedDigits(line, cursor, 2, day)) {
+    if (cursor >= line.size() || !isDigit(line[cursor])) {
+      return std::nullopt;
+    }
+    day = line[cursor] - '0';
+    ++cursor;
+  } else {
+    cursor += 2;
+  }
+
+  if (cursor >= line.size() || line[cursor] != ' ') {
+    return std::nullopt;
+  }
+  ++cursor;
+
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+  if (cursor + 8U > line.size() || line[cursor + 2U] != ':' || line[cursor + 5U] != ':'
+      || !parseFixedDigits(line, cursor, 2, hour)
+      || !parseFixedDigits(line, cursor + 3U, 2, minute)
+      || !parseFixedDigits(line, cursor + 6U, 2, second)) {
+    return std::nullopt;
+  }
+  cursor += 8U;
+
+  if (cursor >= line.size() || line[cursor] != ' ') {
+    return std::nullopt;
+  }
+  ++cursor;
+
+  const auto host = nextToken(line, cursor);
+  if (!host) {
+    return std::nullopt;
+  }
+  cursor = host->second;
+  while (cursor < line.size() && line[cursor] == ' ') {
+    ++cursor;
+  }
+
+  const auto colon = line.find(':', cursor);
+  if (colon == std::string_view::npos) {
+    return std::nullopt;
+  }
+
+  size_t process_start = cursor;
+  size_t process_end = colon;
+  uint32_t pid = 0;
+  if (process_end > process_start && line[process_end - 1U] == ']') {
+    const auto bracket = line.rfind('[', process_end - 1U);
+    if (bracket != std::string_view::npos && bracket > process_start) {
+      if (const auto parsed_pid = parseUnsignedToken(line.substr(bracket + 1U,
+                                                                 process_end - bracket - 2U))) {
+        pid = *parsed_pid;
+        process_end = bracket;
+      }
+    }
+  }
+
+  size_t message_start = colon + 1U;
+  while (message_start < line.size() && line[message_start] == ' ') {
+    ++message_start;
+  }
+
+  const auto now = QDate::currentDate();
+  const QDate date(now.year(), *month, day);
+  const QTime time(hour, minute, second);
+  if (!date.isValid() || !time.isValid()) {
+    return std::nullopt;
+  }
+  const QDateTime date_time(date, time, QTimeZone::systemTimeZone());
+  if (!date_time.isValid()) {
+    return std::nullopt;
+  }
+
+  return SystemdShortPrefix{
+      .msecs_since_epoch = date_time.toMSecsSinceEpoch(),
+      .process_start = process_start,
+      .process_end = process_end,
+      .message_start = message_start,
+      .pid = pid,
+  };
+}
+
+[[nodiscard]] ParsedLineMetadata parseSystemdLine(std::string_view line,
+                                                  uint32_t line_offset) noexcept {
+  ParsedLineMetadata parsed;
+  parsed.line_offset = line_offset;
+  parsed.line_length = static_cast<uint32_t>(line.size());
+  parsed.log_level = LogLevel_Info;
+  parsed.message = ParsedSpan{0, static_cast<uint32_t>(line.size())};
+
+  if (!line.starts_with("__REALTIME_TIMESTAMP="sv)) {
+    if (const auto friendly_prefix = parseSystemdFriendlyPrefix(line)) {
+      parsed.has_timestamp = true;
+      parsed.timestamp_msecs_since_epoch = friendly_prefix->msecs_since_epoch;
+      parsed.log_level = friendly_prefix->level;
+      parsed.pid = friendly_prefix->pid;
+      parsed.function_name =
+          ParsedSpan{static_cast<uint32_t>(friendly_prefix->process_start),
+                     static_cast<uint32_t>(friendly_prefix->process_end - friendly_prefix->process_start)};
+      parsed.message =
+          ParsedSpan{static_cast<uint32_t>(friendly_prefix->message_start),
+                     static_cast<uint32_t>(line.size() - friendly_prefix->message_start)};
+    } else if (const auto short_prefix = parseSystemdShortPrefix(line)) {
+      parsed.has_timestamp = true;
+      parsed.timestamp_msecs_since_epoch = short_prefix->msecs_since_epoch;
+      parsed.pid = short_prefix->pid;
+      parsed.function_name =
+          ParsedSpan{static_cast<uint32_t>(short_prefix->process_start),
+                     static_cast<uint32_t>(short_prefix->process_end - short_prefix->process_start)};
+      parsed.message =
+          ParsedSpan{static_cast<uint32_t>(short_prefix->message_start),
+                     static_cast<uint32_t>(line.size() - short_prefix->message_start)};
+      if (const auto level = findGenericLevelNearStart(line, short_prefix->message_start)) {
+        parsed.log_level = level->level;
+      }
+    } else if (const auto generic = findGenericLevelNearStart(line, 0)) {
+      parsed.log_level = generic->level;
+    }
+    return parsed;
+  }
+
+  size_t field_start = 0;
+  while (field_start <= line.size()) {
+    const auto field_end = line.find('\t', field_start);
+    const auto end = field_end == std::string_view::npos ? line.size() : field_end;
+    const auto field = line.substr(field_start, end - field_start);
+    const auto equals = field.find('=');
+    if (equals != std::string_view::npos) {
+      const auto key = field.substr(0, equals);
+      const auto value = field.substr(equals + 1U);
+      if (key == "__REALTIME_TIMESTAMP"sv) {
+        uint64_t usecs = 0;
+        const auto result = std::from_chars(value.data(), value.data() + value.size(), usecs);
+        if (result.ec == std::errc{} && result.ptr == value.data() + value.size()) {
+          parsed.has_timestamp = true;
+          parsed.timestamp_msecs_since_epoch = static_cast<int64_t>(usecs / 1000U);
+        }
+      } else if (key == "PRIORITY"sv) {
+        parsed.log_level = parseSystemdPriority(value);
+      } else if (key == "_PID"sv) {
+        if (const auto pid = parseUnsignedToken(value)) {
+          parsed.pid = *pid;
+        }
+      } else if (key == "_TID"sv) {
+        if (const auto tid = parseUnsignedToken(value)) {
+          parsed.tid = *tid;
+        }
+      } else if (key == "_COMM"sv || (key == "SYSLOG_IDENTIFIER"sv && !parsed.function_name.valid())) {
+        parsed.function_name =
+            ParsedSpan{static_cast<uint32_t>(field_start + equals + 1U),
+                       static_cast<uint32_t>(value.size())};
+      } else if (key == "MESSAGE"sv) {
+        parsed.message =
+            ParsedSpan{static_cast<uint32_t>(field_start + equals + 1U),
+                       static_cast<uint32_t>(value.size())};
+        if (parsed.log_level == LogLevel_Info) {
+          if (const auto level = findGenericLevelNearStart(value, 0)) {
+            parsed.log_level = level->level;
+          }
+        }
+      }
+    }
+
+    if (field_end == std::string_view::npos) {
+      break;
+    }
+    field_start = field_end + 1U;
+  }
+
+  return parsed;
+}
+
 class LogfaultScanner final : public LogFormatScanner {
  public:
   [[nodiscard]] const char* name() const noexcept override { return "Logfault"; }
@@ -718,6 +1022,59 @@ class LogcatScanner final : public LogFormatScanner {
       }
       lines.push_back(parseLogcatLine(page_bytes.substr(line_start, line_end - line_start),
                                       static_cast<uint32_t>(line_start)));
+    }
+
+    return lines;
+  }
+};
+
+class SystemdScanner final : public LogFormatScanner {
+ public:
+  [[nodiscard]] const char* name() const noexcept override { return "Systemd"; }
+  [[nodiscard]] bool startsLogicalLine(std::string_view) const noexcept override { return true; }
+
+  [[nodiscard]] FastScanResult scanLineFast(std::string_view line) const noexcept override {
+    const auto parsed = parseSystemdLine(line, 0);
+    FastScanResult result;
+    result.log_level = parsed.log_level;
+    result.has_timestamp = parsed.has_timestamp;
+    if (parsed.has_timestamp) {
+      result.timestamp =
+          std::chrono::system_clock::time_point{std::chrono::milliseconds{
+              parsed.timestamp_msecs_since_epoch}};
+    }
+    return result;
+  }
+
+  [[nodiscard]] std::vector<ParsedLineMetadata> buildLineIndex(
+      std::string_view page_bytes) const override {
+    std::vector<ParsedLineMetadata> lines;
+    if (page_bytes.empty()) {
+      return lines;
+    }
+
+    size_t line_start = 0;
+    for (size_t index = 0; index < page_bytes.size(); ++index) {
+      if (page_bytes[index] != '\n') {
+        continue;
+      }
+
+      size_t line_end = index;
+      if (line_end > line_start && page_bytes[line_end - 1U] == '\r') {
+        --line_end;
+      }
+      lines.push_back(parseSystemdLine(page_bytes.substr(line_start, line_end - line_start),
+                                       static_cast<uint32_t>(line_start)));
+      line_start = index + 1U;
+    }
+
+    if (line_start < page_bytes.size()) {
+      size_t line_end = page_bytes.size();
+      if (line_end > line_start && page_bytes[line_end - 1U] == '\r') {
+        --line_end;
+      }
+      lines.push_back(parseSystemdLine(page_bytes.substr(line_start, line_end - line_start),
+                                       static_cast<uint32_t>(line_start)));
     }
 
     return lines;
@@ -880,12 +1237,16 @@ std::unique_ptr<LogFormatScanner> createLogScannerByName(std::string_view reques
     return std::make_unique<LogcatScanner>();
   }
 
+  if (requested_name == "Systemd"sv) {
+    return std::make_unique<SystemdScanner>();
+  }
+
   return createDefaultLogScanner();
 }
 
 QStringList availableLogScannerNames() {
   return {QStringLiteral("Auto"), QStringLiteral("Generic"), QStringLiteral("None"),
-          QStringLiteral("Logfault"), QStringLiteral("Logcat")};
+          QStringLiteral("Logfault"), QStringLiteral("Logcat"), QStringLiteral("Systemd")};
 }
 
 }  // namespace lgx

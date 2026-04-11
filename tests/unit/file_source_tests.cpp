@@ -466,5 +466,75 @@ TEST(FileSourceTests, LogcatScannerPreservesPidAndNumericTid) {
   EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Warn);
 }
 
+TEST(FileSourceTests, SystemdScannerParsesStructuredJournalFields) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "journal.log",
+      "__REALTIME_TIMESTAMP=1712067163821000\tPRIORITY=3\t_PID=1234\t_TID=5678\t_COMM=sshd\tMESSAGE=Failed password for root\n"
+      "__REALTIME_TIMESTAMP=1712067164821000\tPRIORITY=6\tSYSLOG_IDENTIFIER=systemd\tMESSAGE=Started Session 12\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Systemd");
+  source.startIndexing();
+
+  SourceLines fetched;
+  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 2U);
+  EXPECT_EQ(fetched.lines[0].pid, 1234U);
+  EXPECT_EQ(fetched.lines[0].tid, 5678U);
+  EXPECT_EQ(fetched.lines[0].function_name, "sshd");
+  EXPECT_EQ(fetched.lines[0].message, "Failed password for root");
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Error);
+  EXPECT_TRUE(fetched.lines[0].timestamp.has_value());
+  EXPECT_EQ(fetched.lines[1].function_name, "systemd");
+  EXPECT_EQ(fetched.lines[1].message, "Started Session 12");
+  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Info);
+}
+
+TEST(FileSourceTests, SystemdScannerParsesFriendlyStreamMessages) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "systemd-friendly.log",
+      "2026-03-27 04:22:39.259 WARN glogg[2137]: QFile::open: File (/tmp/nextapp-devel.log) already open\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Systemd");
+  source.startIndexing();
+
+  SourceLines fetched;
+  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 1U);
+  EXPECT_EQ(fetched.lines[0].pid, 2137U);
+  EXPECT_EQ(fetched.lines[0].function_name, "glogg");
+  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Warn);
+  EXPECT_EQ(fetched.lines[0].message,
+            "QFile::open: File (/tmp/nextapp-devel.log) already open");
+  EXPECT_TRUE(fetched.lines[0].timestamp.has_value());
+}
+
+TEST(FileSourceTests, SystemdScannerParsesJournalctlShortMessages) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(
+      std::filesystem::path(dir.path().toStdString()) / "journalctl.log",
+      "Apr 02 16:12:43 host sudo[4321]: authentication failure\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.setRequestedScannerName("Systemd");
+  source.startIndexing();
+
+  SourceLines fetched;
+  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
+  ASSERT_EQ(fetched.lines.size(), 1U);
+  EXPECT_EQ(fetched.lines[0].pid, 4321U);
+  EXPECT_EQ(fetched.lines[0].function_name, "sudo");
+  EXPECT_TRUE(fetched.lines[0].timestamp.has_value());
+}
+
 }  // namespace
 }  // namespace lgx

@@ -72,6 +72,7 @@ class LogModel final : public QAbstractListModel {
   Q_INVOKABLE QString plainTextAt(int row) const;
   Q_INVOKABLE int sourceRowAt(int row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
+  Q_INVOKABLE QString functionNameAt(int row) const;
   Q_INVOKABLE int logLevelAt(int row) const;
   Q_INVOKABLE int pidAt(int row) const;
   Q_INVOKABLE int tidAt(int row) const;
