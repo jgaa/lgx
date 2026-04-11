@@ -1,180 +1,215 @@
-
 # LGX: High-Performance Multi-Source Log Viewer
+
+![Screen dump](images/lgx.jpg)
 
 ## 1. Vision & Goals
 
-The goal of this project is to build a **modern, high-performance log viewer for Linux (and eventually cross-platform)** that scales from single multi-million-line log files to **live, remote, and structured log sources** such as Docker, Loki, and other streaming backends.
+The goal of this project is to build a **modern, high-performance log viewer for Linux that scales from single files to multi-million-line logs and streaming sources**.
 
 The application should feel closer to an **IDE for logs** than a traditional text viewer:
 
 * Fast, responsive UI regardless of log size
 * Multiple windows and tabs
-* Strong support for structured logs (JSON)
+* Easy marking of log lines with multiple colors
 * Extensible log source architecture
-* Direct support for log-streams from Docker, Systemd, Android (for connected devices).
-* Correct parsing and coloring for common log formats. 
+* Direct support for log streams from Docker, Systemd, and Android (connected devices)
+* Correct parsing and coloring for common log formats
 
-Basically a log-viewer for lazy developers and devops people.
+In short: a log viewer for serious developers and DevOps professionals.
+
+I have used `glogg` as my log viewer of choice for a long time, but it is beginning to show its age and lacks built-in support for log streams. Viewing and analyzing logs is an important part of my daily work, so having the best tools available matters.
+
+This is not the first log viewer I have created. But it is by far the best.
+
+---
 
 ## 2. Features
 
-LGX is built to handle both ordinary log files and live log streams without
-switching mental models.
+* Open multiple logs in tabs, like a web browser
+* Open local files, pipe streams, Systemd journal, Docker container logs, and Android `logcat` streams
+* Apply multiple filters to a single log source
+* Separate pane for marked lines
+* Treat streams like normal logs: follow, navigate, filter and mark
+* Auto-detect and colorize common log formats (generic text, Logfault-style, Logcat, Systemd)
+* Per-source format override when auto-detection is insufficient
+* Fast navigation (first/last line, ±10%, next/previous warning or error)
+* Jump to an exact line number
+* Optional follow mode for live logs
+* Optional line wrapping
+* Adjustable zoom (UI, mouse, keyboard)
+* Selection-aware copy (single and multi-line)
+* Per-line actions: mark/unmark, copy, expanded view
+* Filter and marked views as horizontal or vertical splits
+* Recent file and stream history
+* Session-aware UI (wrapping, scanner selection, etc.)
 
-Interesting features already implemented include:
+---
 
-* Open multiple logs at once in tabs.
-* Open local files, pipe streams, Systemd journal, Docker container logs, and Android `logcat`
-  streams.
-* Treat streams like normal logs: they can be followed, navigated, filtered,
-  marked, and reopened from recent history.
-* Auto-detect and colorize common log formats including generic text logs,
-  Logfault-style logs, and Logcat.
-* Per-source format override when auto-detection is not enough.
-* Fast navigation to first/last line, jump up or down by 10%, and jump directly
-  to the next or previous warning or error.
-* Go to an exact line number.
-* Optional follow mode for live logs.
-* Optional line wrapping for long entries.
-* Adjustable log zoom from the UI, mouse, and keyboard.
-* Selection-aware copy support for both single lines and multi-line selections.
-* Per-line actions including mark/unmark, copy, and expanded line view.
-* Filter views and marked views that can be opened as horizontal or vertical
-  splits alongside the primary log view.
-* Recent-file and recent-stream menus for quickly restoring previous sessions.
-* Session-oriented UI details such as remembered per-source wrapping and scanner
-  selection.
+## 3. How It Works
 
-## 3. Architecture
-
-LGX is designed around the idea that **streams should behave like files** as far
-as possible.
+LGX is designed around the idea that **streams should behave like files** as much as possible.
 
 ### Streams as files
 
-Live sources such as pipe commands, Docker logs, and Android logcat are exposed
-through `StreamSource`. A stream provider only has to produce bytes. LGX then
-spools those bytes into a temporary file and delegates indexing, paging, and
-line fetches to the same `FileSource` pipeline used for ordinary files.
+Live sources (pipe commands, Docker logs, Android logcat, Systemd logs) are handled as stream providers.
 
-That gives streamed logs the same behavior as file-backed logs:
+They write incoming log events to a temporary file and reuse the same indexing, paging, and line-fetching pipeline as regular files.
 
-* the same scanners
-* the same paging and caching
-* the same navigation model
-* the same selection and copy behavior
-* the same follow-mode semantics
+This gives streamed logs the same behavior as file-backed logs.
 
-In practice, this keeps the application architecture simpler and avoids building
-one feature set for files and another for live sources.
+---
 
 ### Fast initial scanning
 
-The first pass over a source is optimized for startup speed. Log scanners expose
-fast line-level classification methods so LGX can quickly build a lightweight
-index with offsets, line boundaries, and log-level metadata before deeper work
-is needed. That means the UI can become useful quickly even for large files.
+The first pass over a source is optimized for startup speed.
 
-The scanners also support incremental refresh. When a file grows or a stream
-appends new bytes, LGX extends the existing source state instead of rescanning
-the whole log from scratch.
+Log scanners provide fast line-level classification so LGX can quickly build a lightweight index (offsets, line boundaries, log levels). This allows the UI to become usable quickly, even for very large files.
+
+Scanners also support incremental updates. When a file grows or a stream appends data, LGX extends the existing state instead of rebuilding it.
+
+---
 
 ### Memory-conscious paging and LRU cache
 
-LGX does not keep the full text of every opened source resident in memory.
-`LogSource` stores stable metadata such as page descriptors, line counts, and
-per-page indexing data, while the actual loaded page payloads live in a shared
-process-wide `GlobalPageCache`.
+LGX does not keep full log contents in memory.
 
-That cache is:
+Instead, it stores metadata (page descriptors, line counts, indexing data), while actual text pages are stored in a shared LRU page cache.
 
-* keyed by `{source_id, page_index}`
-* shared across all log sources
-* protected against duplicate in-flight page loads
-* trimmed with an LRU policy
+* Active pages remain in memory
+* Older, unused pages are evicted
 
-Pages that are actively referenced stay alive, while older unreferenced pages
-can be evicted. This keeps large logs usable without turning every open tab into
-a full in-memory copy of the source.
+This keeps large logs responsive without turning each open tab into a full in-memory copy.
+
+---
 
 ## 4. How to Use
 
 ### Opening logs
 
-Use the main menus to open the source you want:
+Use the menus to open sources:
 
-* `File -> Open` opens a regular file.
-* `Sources -> Open Pipe Stream` runs a command such as `journalctl -f` and opens
-  its output as a live source.
-* `Sources -> Docker -> Open Running Containers` opens one or more container
-  logs.
-* `Sources -> Logcat -> Open Devices` opens one or more Android logcat streams.
-* `File -> Recent` and `Sources -> Recent` reopen previously used files and
-  streams.
+* `File -> Open` — open a file
+* `Sources -> Open Pipe Stream` — run a command (e.g. `journalctl -f`)
+* `Sources -> Docker -> Open Running Containers`
+* `Sources -> Logcat -> Open Devices`
+* `File -> Recent` / `Sources -> Recent` — reopen previous sources
+
+---
 
 ### Main view controls
 
-The main toolbar focuses on the active log tab:
+The toolbar operates on the main tab:
 
-* toggle follow mode
-* toggle line wrapping
-* jump to first or last line
-* jump up or down by 10%
-* jump to previous or next warning
-* jump to previous or next error
+* Toggle follow mode
+* Toggle line wrapping
+* Jump to first/last line
+* Jump ±10%
+* Jump to next/previous warning or error
 
-The status bar shows the current source, line count, current line, active
-format, file size, ingestion rate, and zoom percentage.
+The status bar shows:
+
+* Source
+* Line count
+* Current line
+* Format
+* File size
+* Ingestion rate
+* Zoom level
+
+Jump operations use the page cache, making them fast even on large logs.
+
+---
 
 ### Menus and context menus
 
 Useful menu paths:
 
-* `View -> Follow -> Enabled` toggles follow mode.
-* `View -> Log Lines -> Wrap long lines` toggles wrapping.
-* `View -> Zoom` sets a fixed zoom percentage.
-* `View -> Format` overrides the scanner/format for the current log.
-* `View -> Goto Line` jumps directly to a line number.
-* `Windows -> Add Filter View` opens a filtered split view.
-* `Windows -> Add Marked View` opens a split view containing only marked lines.
+* `View -> Follow -> Enabled`
+* `View -> Log Lines -> Wrap long lines`
+* `View -> Zoom`
+* `View -> Format` (override scanner)
+* `View -> Goto Line`
+* `Windows -> Add Filter View`
+* `Windows -> Add Marked View`
 
-Interesting context menus inside a log view:
+Context menu (log view):
 
-* right-click a line to `Copy Line`, `Copy Selection`, or `Show`
-* long-press a line to open the same expanded line popup as `Show`
-* click the gutter marker to mark or unmark a line
+* Right-click → `Copy Line`, `Copy Selection`, `Show`
+* Long-press → expanded line view
+* Gutter click → mark/unmark line. If you hold down keys 1 - 5, you get different colors for trhe mark.
+
+---
 
 ### Keyboard and mouse shortcuts
 
-Current shortcuts and gestures:
+* `f` — toggle follow mode
+* `Ctrl+L` — go to line
+* `Ctrl+F` — horizontal filter split
+* `Ctrl+Shift+F` — vertical filter split
+* `Ctrl+M` — horizontal marked split
+* `Ctrl+Shift+M` — vertical marked split
+* Arrow keys — scroll by line
+* `PgUp` / `PgDown` — scroll by page
+* `Left` / `Right` — horizontal scroll (when wrapping is off)
+* `Ctrl+Left` / `Ctrl+Right` — jump to start/end of line
+* `Ctrl + Mouse Wheel` — zoom
+* Mouse wheel — scroll
+* Scrollbars — manual navigation
+* Double-click zoom value → reset to 100%
 
-* `f` toggles follow mode.
-* `Ctrl+L` opens `Goto Line`.
-* `Ctrl+F` opens a horizontal filter split.
-* `Ctrl+Shift+F` opens a vertical filter split.
-* `Ctrl+M` opens a horizontal marked split.
-* `Ctrl+Shift+M` opens a vertical marked split.
-* `Up` and `Down` scroll by line.
-* `PgUp` and `PgDown` scroll by page.
-* `Left` and `Right` scroll horizontally when wrapping is off.
-* `Ctrl+Left` jumps to the start of the selected or current line.
-* `Ctrl+Right` jumps to the end of the selected or current line.
-* `Ctrl+Mouse Wheel` changes log zoom.
-* plain mouse wheel scrolls the log view.
-* dragging the vertical or horizontal scrollbar works as expected for manual
-  navigation.
-* double-click on the status bar's zoom value changes it to 100%.
+Behavior notes:
 
-Behavior worth knowing:
+* Scrolling up disables follow mode
+* Wrapping disables horizontal scrolling
+* Copy works on the current selection
 
-* scrolling upward manually disables follow mode
-* wrapping disables horizontal scrolling because the view becomes line-wrapped
-* `Copy` works on the current selection from the active log view
+---
+
+## 5. Build from Source
+
+LGX uses CMake, Qt 6, Boost headers, QCoro, and optionally `libsystemd` for the Systemd source.
+
+### Debian / Ubuntu
+
+```sh
+sudo apt install \
+  build-essential cmake ninja-build git pkg-config \
+  qt6-base-dev qt6-declarative-dev qt6-svg-dev \
+  libboost-dev libsystemd-dev
+```
+
+### Fedora
+
+```sh
+sudo dnf install \
+  gcc-c++ cmake ninja-build git pkgconf-pkg-config \
+  qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
+  boost-devel systemd-devel
+```
+
+### Arch Linux
+
+```sh
+sudo pacman -S \
+  base-devel cmake ninja git pkgconf \
+  qt6-base qt6-declarative qt6-svg \
+  boost systemd
+```
+
+### Build
+
+```sh
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+The application binary will be available as `build/bin/lgx`.
+
+---
 
 ## Systemd
 
-If you want access to system logs, not just your own users log events, 
-you must add yourself to the appropriate group:
+To access full system logs (not just your user logs), add your user to the appropriate group:
 
 ```sh
 sudo usermod -aG systemd-journal $USER
@@ -182,6 +217,14 @@ sudo usermod -aG systemd-journal $USER
 
 Then log out and back in.
 
-## Status:
+To disable the Systemd source at configure time:
 
-**Under initial development**
+```sh
+cmake -S . -B build -G Ninja -DLGX_ENABLE_SYSTEMD_SOURCE=OFF
+```
+
+---
+
+## Status
+
+**Beta**
