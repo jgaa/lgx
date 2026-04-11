@@ -406,18 +406,9 @@ Item {
         }
     }
 
-    SymbolToolButton {
+    PaneMenuButton {
         id: viewMenuButton
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 10
-        z: 2
-        visible: viewMenuButton.hovered || viewMenuButton.down || viewHoverArea.containsMouse
-        symbol: "menu"
-        symbolPixelSize: 18
-        implicitWidth: 28
-        implicitHeight: 28
-        bgColor: "#efe7db"
+        hoverTarget: viewHoverArea
         onClicked: root.openViewMenu()
     }
 
@@ -500,16 +491,12 @@ Item {
             }
         }
 
-        Menu {
-            title: qsTr("Close")
-
-            MenuItem {
-                text: qsTr("This Pane")
-                enabled: !!root.workspace && root.nodeId >= 0
-                onTriggered: {
-                    if (root.workspace) {
-                        root.workspace.closePane(root.nodeId)
-                    }
+        MenuItem {
+            text: qsTr("Close")
+            enabled: !!root.workspace && root.nodeId >= 0
+            onTriggered: {
+                if (root.workspace) {
+                    root.workspace.closePane(root.nodeId)
                 }
             }
         }

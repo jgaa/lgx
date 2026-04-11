@@ -15,6 +15,7 @@ qt_add_qml_module(lgx_app
     qml/LogWorkspace.qml
     qml/MarkedView.qml
     qml/components/LineMarkButton.qml
+    qml/components/PaneMenuButton.qml
     qml/components/SymbolToolButton.qml
     qml/DialogHelper.js
     qml/GeneralSettings.qml

@@ -338,18 +338,9 @@ Item {
         }
     }
 
-    SymbolToolButton {
+    PaneMenuButton {
         id: viewMenuButton
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 2
-        z: 2
-        visible: viewMenuButton.hovered || viewMenuButton.down || viewHoverArea.containsMouse
-        symbol: "menu"
-        symbolPixelSize: 14
-        implicitWidth: 18
-        implicitHeight: 18
-        bgColor: "#00000000"
+        hoverTarget: viewHoverArea
         onClicked: root.openViewMenu()
     }
 
