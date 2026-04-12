@@ -21,7 +21,9 @@ ApplicationWindow {
         return wrapper ? wrapper.workspace : null
     }
     readonly property var activeCurrentLogModel: AppEngine.currentLogModel
-    readonly property var activeLogView: activeWorkspace ? activeWorkspace.primaryLogView : null
+    readonly property var activeLogView: activeWorkspace && activeWorkspace.resolvePrimaryLogView
+        ? activeWorkspace.resolvePrimaryLogView()
+        : null
     readonly property var activeView: activeWorkspace ? activeWorkspace.activeView : activeLogView
     readonly property url activeSourceUrl: AppEngine.currentOpenLogSourceUrl
     readonly property string activeSourceText: activeSourceUrl ? AppEngine.displaySourceTextForUrl(activeSourceUrl) : ""
@@ -70,6 +72,28 @@ ApplicationWindow {
 
     function setCurrentTabIndex(index) {
         tabBar.currentIndex = index
+    }
+
+    function syncCurrentTabSelection() {
+        if (AppEngine.openLogCount <= 0) {
+            if (tabBar.currentIndex !== -1) {
+                tabBar.currentIndex = -1
+                return
+            }
+
+            AppEngine.setCurrentOpenLogIndex(-1)
+            return
+        }
+
+        const normalizedIndex = (tabBar.currentIndex >= 0 && tabBar.currentIndex < AppEngine.openLogCount)
+            ? tabBar.currentIndex
+            : 0
+        if (tabBar.currentIndex !== normalizedIndex) {
+            tabBar.currentIndex = normalizedIndex
+            return
+        }
+
+        AppEngine.setCurrentOpenLogIndex(normalizedIndex)
     }
 
     function toggleActiveFollow() {
@@ -165,6 +189,7 @@ ApplicationWindow {
     }
 
     property var dockerSelectionMap: ({})
+    property bool dockerNoHistorySelection: UiSettings.dockerNoHistoryByDefault
 
     function openPipeStreamFromDialog() {
         const command = pipeCommandField.text.trim()
@@ -185,15 +210,18 @@ ApplicationWindow {
 
     function openDockerContainersDialog() {
         dockerSelectionMap = ({})
+        dockerNoHistorySelection = UiSettings.dockerNoHistoryByDefault
         AppEngine.refreshDockerContainers()
         AppEngine.logUiTrace("openDockerContainersDialog opened")
         openDockerContainersDialogBox.open()
     }
 
     property var adbSelectionMap: ({})
+    property bool adbNoHistorySelection: UiSettings.adbNoHistoryByDefault
 
     function openAdbDevicesDialog() {
         adbSelectionMap = ({})
+        adbNoHistorySelection = UiSettings.adbNoHistoryByDefault
         AppEngine.refreshAdbDevices()
         openAdbDevicesDialogBox.open()
     }
@@ -229,7 +257,10 @@ ApplicationWindow {
             const serial = serials[i]
             AppEngine.logUiTrace("opening adb device serial='" + serial
                                  + "' name='" + adbSelectionMap[serial] + "'")
-            lastIndex = AppEngine.openAdbLogcatStream(serial, adbSelectionMap[serial])
+            lastIndex = AppEngine.openAdbLogcatStream(
+                        serial,
+                        adbSelectionMap[serial],
+                        adbNoHistorySelection)
             AppEngine.logUiTrace("openAdbLogcatStream result=" + lastIndex)
         }
         if (lastIndex >= 0) {
@@ -269,7 +300,10 @@ ApplicationWindow {
             const containerId = containerIds[i]
             AppEngine.logUiTrace("opening docker container id='" + containerId
                                  + "' name='" + dockerSelectionMap[containerId] + "'")
-            lastIndex = AppEngine.openDockerContainerStream(containerId, dockerSelectionMap[containerId])
+            lastIndex = AppEngine.openDockerContainerStream(
+                        containerId,
+                        dockerSelectionMap[containerId],
+                        dockerNoHistorySelection)
             AppEngine.logUiTrace("openDockerContainerStream result=" + lastIndex)
         }
         if (lastIndex >= 0) {
@@ -790,6 +824,14 @@ ApplicationWindow {
         anchors.margins: 6
         spacing: 4
 
+        Connections {
+            target: AppEngine
+
+            function onOpenLogCountChanged() {
+                Qt.callLater(window.syncCurrentTabSelection)
+            }
+        }
+
         TabBar {
             id: tabBar
             Layout.fillWidth: true
@@ -889,7 +931,7 @@ ApplicationWindow {
             }
         }
 
-        Component.onCompleted: AppEngine.setCurrentOpenLogIndex(tabBar.currentIndex)
+        Component.onCompleted: Qt.callLater(window.syncCurrentTabSelection)
 
         StackLayout {
             id: workspaceStack
@@ -1230,6 +1272,13 @@ ApplicationWindow {
                 text: qsTr("Select one or more containers.")
                 color: "#b22222"
             }
+
+            CheckBox {
+                id: dockerNoHistoryCheck
+                text: qsTr("no history")
+                checked: window.dockerNoHistorySelection
+                onToggled: window.dockerNoHistorySelection = checked
+            }
         }
     }
 
@@ -1363,6 +1412,13 @@ ApplicationWindow {
                 visible: window.selectedAdbDeviceCount() === 0
                 text: qsTr("Select one or more online devices.")
                 color: "#b22222"
+            }
+
+            CheckBox {
+                id: adbNoHistoryCheck
+                text: qsTr("no history")
+                checked: window.adbNoHistorySelection
+                onToggled: window.adbNoHistorySelection = checked
             }
         }
     }

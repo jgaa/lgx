@@ -142,8 +142,9 @@ class PipeStreamProvider final : public IStreamProvider {
 
 class DockerStreamProvider final : public IStreamProvider {
  public:
-  explicit DockerStreamProvider(QString container_id)
-      : container_id_(std::move(container_id)) {
+  DockerStreamProvider(QString container_id, bool no_history)
+      : container_id_(std::move(container_id)),
+        no_history_(no_history) {
     QObject::connect(&process_, &QProcess::readyReadStandardOutput, &process_, [this]() {
       if (callbacks_.on_bytes) {
         callbacks_.on_bytes(process_.readAllStandardOutput());
@@ -179,8 +180,17 @@ class DockerStreamProvider final : public IStreamProvider {
 
   void start() override {
     process_.setProgram(QStringLiteral("docker"));
-    process_.setArguments({QStringLiteral("logs"), QStringLiteral("-f"),
-                           QStringLiteral("--timestamps"), container_id_});
+    QStringList arguments{
+        QStringLiteral("logs"),
+        QStringLiteral("-f"),
+        QStringLiteral("--timestamps"),
+    };
+    if (no_history_) {
+      arguments.push_back(QStringLiteral("--since"));
+      arguments.push_back(QStringLiteral("0s"));
+    }
+    arguments.push_back(container_id_);
+    process_.setArguments(arguments);
     process_.setProcessChannelMode(QProcess::SeparateChannels);
     process_.start();
   }
@@ -204,12 +214,14 @@ class DockerStreamProvider final : public IStreamProvider {
   QProcess process_;
   Callbacks callbacks_;
   QString container_id_;
+  bool no_history_{false};
 };
 
 class AdbLogcatProvider final : public IStreamProvider {
  public:
-  explicit AdbLogcatProvider(QString serial)
-      : serial_(std::move(serial)) {
+  AdbLogcatProvider(QString serial, bool no_history)
+      : serial_(std::move(serial)),
+        no_history_(no_history) {
     QObject::connect(&process_, &QProcess::readyReadStandardOutput, &process_, [this]() {
       if (callbacks_.on_bytes) {
         callbacks_.on_bytes(process_.readAllStandardOutput());
@@ -254,11 +266,22 @@ class AdbLogcatProvider final : public IStreamProvider {
     }
 
     process_.setProgram(adb_path);
-    process_.setArguments({QStringLiteral("-s"), serial_, QStringLiteral("logcat"),
-                           QStringLiteral("-v"), QStringLiteral("threadtime")});
+    QStringList arguments{
+        QStringLiteral("-s"),
+        serial_,
+        QStringLiteral("logcat"),
+    };
+    if (no_history_) {
+      arguments.push_back(QStringLiteral("-T"));
+      arguments.push_back(QDateTime::currentDateTime().toString(QStringLiteral("MM-dd hh:mm:ss.zzz")));
+    }
+    arguments.push_back(QStringLiteral("-v"));
+    arguments.push_back(QStringLiteral("threadtime"));
+    process_.setArguments(arguments);
     process_.setProcessChannelMode(QProcess::SeparateChannels);
     LOG_INFO << "Starting adb logcat provider with program='"
-             << adb_path.toStdString() << "' serial='" << serial_.toStdString() << "'";
+             << adb_path.toStdString() << "' serial='" << serial_.toStdString()
+             << "' noHistory=" << (no_history_ ? "true" : "false");
     process_.start();
   }
 
@@ -281,6 +304,7 @@ class AdbLogcatProvider final : public IStreamProvider {
   QProcess process_;
   Callbacks callbacks_;
   QString serial_;
+  bool no_history_{false};
 };
 
 #ifdef LGX_ENABLE_SYSTEMD_SOURCE
@@ -594,7 +618,8 @@ std::optional<PipeStreamSpec> StreamSource::parsePipeSpec(const QUrl& url) {
   return spec;
 }
 
-QUrl StreamSource::makeDockerUrl(const QString& container_id, const QString& container_name) {
+QUrl StreamSource::makeDockerUrl(const QString& container_id, const QString& container_name,
+                                 bool no_history) {
   QUrl url;
   url.setScheme(QLatin1StringView{kDockerScheme});
   url.setPath(QStringLiteral("/") + QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -603,6 +628,9 @@ QUrl StreamSource::makeDockerUrl(const QString& container_id, const QString& con
   query.addQueryItem(QStringLiteral("container"), container_id.trimmed());
   if (!container_name.trimmed().isEmpty()) {
     query.addQueryItem(QStringLiteral("name"), container_name.trimmed());
+  }
+  if (no_history) {
+    query.addQueryItem(QStringLiteral("noHistory"), QStringLiteral("1"));
   }
   url.setQuery(query);
   return url;
@@ -621,6 +649,7 @@ std::optional<DockerStreamSpec> StreamSource::parseDockerSpec(const QUrl& url) {
   }
   spec.container_id = query.queryItemValue(QStringLiteral("container")).trimmed();
   spec.container_name = query.queryItemValue(QStringLiteral("name")).trimmed();
+  spec.no_history = queryFlagValue(query, QStringLiteral("noHistory"), false);
   if (spec.container_id.isEmpty()) {
     return std::nullopt;
   }
@@ -628,7 +657,7 @@ std::optional<DockerStreamSpec> StreamSource::parseDockerSpec(const QUrl& url) {
   return spec;
 }
 
-QUrl StreamSource::makeAdbLogcatUrl(const QString& serial, const QString& name) {
+QUrl StreamSource::makeAdbLogcatUrl(const QString& serial, const QString& name, bool no_history) {
   QUrl url;
   url.setScheme(QLatin1StringView{kAdbScheme});
   url.setPath(QStringLiteral("/") + QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -637,6 +666,9 @@ QUrl StreamSource::makeAdbLogcatUrl(const QString& serial, const QString& name) 
   query.addQueryItem(QStringLiteral("serial"), serial.trimmed());
   if (!name.trimmed().isEmpty()) {
     query.addQueryItem(QStringLiteral("name"), name.trimmed());
+  }
+  if (no_history) {
+    query.addQueryItem(QStringLiteral("noHistory"), QStringLiteral("1"));
   }
   url.setQuery(query);
   return url;
@@ -655,6 +687,7 @@ std::optional<AdbLogcatSpec> StreamSource::parseAdbLogcatSpec(const QUrl& url) {
   }
   spec.serial = query.queryItemValue(QStringLiteral("serial")).trimmed();
   spec.name = query.queryItemValue(QStringLiteral("name")).trimmed();
+  spec.no_history = queryFlagValue(query, QStringLiteral("noHistory"), false);
   if (spec.serial.isEmpty()) {
     return std::nullopt;
   }
@@ -878,11 +911,11 @@ std::unique_ptr<IStreamProvider> StreamSource::createProvider(const QUrl& url) {
   if (const auto docker_spec = parseDockerSpec(url); docker_spec.has_value()) {
     LOG_INFO << "Using docker stream provider for container='"
              << docker_spec->container_id.toStdString() << "'";
-    return std::make_unique<DockerStreamProvider>(docker_spec->container_id);
+    return std::make_unique<DockerStreamProvider>(docker_spec->container_id, docker_spec->no_history);
   }
   if (const auto adb_spec = parseAdbLogcatSpec(url); adb_spec.has_value()) {
     LOG_INFO << "Using adb logcat provider for serial='" << adb_spec->serial.toStdString() << "'";
-    return std::make_unique<AdbLogcatProvider>(adb_spec->serial);
+    return std::make_unique<AdbLogcatProvider>(adb_spec->serial, adb_spec->no_history);
   }
   if (const auto systemd_spec = parseSystemdJournalSpec(url); systemd_spec.has_value()) {
 #ifdef LGX_ENABLE_SYSTEMD_SOURCE

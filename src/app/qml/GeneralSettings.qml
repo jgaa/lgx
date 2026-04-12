@@ -12,6 +12,8 @@ ScrollView {
     property int originalLogZoomPercent: UiSettings.logZoomPercent
     property bool originalFollowLiveLogsByDefault: UiSettings.followLiveLogsByDefault
     property bool originalWrapLogLinesByDefault: UiSettings.wrapLogLinesByDefault
+    property bool originalDockerNoHistoryByDefault: UiSettings.dockerNoHistoryByDefault
+    property bool originalAdbNoHistoryByDefault: UiSettings.adbNoHistoryByDefault
     property int originalFollowScrollIntervalMs: UiSettings.followScrollIntervalMs
     property int originalFollowHighRateScrollIntervalMs: UiSettings.followHighRateScrollIntervalMs
     property string originalDefaultLogScannerName: UiSettings.defaultLogScannerName
@@ -53,11 +55,15 @@ ScrollView {
         originalLogZoomPercent = UiSettings.logZoomPercent
         originalFollowLiveLogsByDefault = UiSettings.followLiveLogsByDefault
         originalWrapLogLinesByDefault = UiSettings.wrapLogLinesByDefault
+        originalDockerNoHistoryByDefault = UiSettings.dockerNoHistoryByDefault
+        originalAdbNoHistoryByDefault = UiSettings.adbNoHistoryByDefault
         originalFollowScrollIntervalMs = UiSettings.followScrollIntervalMs
         originalFollowHighRateScrollIntervalMs = UiSettings.followHighRateScrollIntervalMs
         originalDefaultLogScannerName = UiSettings.defaultLogScannerName
         followLiveLogsByDefaultCheck.checked = UiSettings.followLiveLogsByDefault
         wrapLogLinesByDefaultCheck.checked = UiSettings.wrapLogLinesByDefault
+        dockerNoHistoryByDefaultCheck.checked = UiSettings.dockerNoHistoryByDefault
+        adbNoHistoryByDefaultCheck.checked = UiSettings.adbNoHistoryByDefault
         followScrollIntervalSpin.value = UiSettings.followScrollIntervalMs
         followHighRateScrollIntervalSpin.value = UiSettings.followHighRateScrollIntervalMs
         defaultScannerCombo.currentIndex = defaultScannerCombo.find(UiSettings.defaultLogScannerName)
@@ -70,11 +76,15 @@ ScrollView {
         UiSettings.setLogZoomPercent(originalLogZoomPercent)
         UiSettings.setFollowLiveLogsByDefault(originalFollowLiveLogsByDefault)
         UiSettings.setWrapLogLinesByDefault(originalWrapLogLinesByDefault)
+        UiSettings.setDockerNoHistoryByDefault(originalDockerNoHistoryByDefault)
+        UiSettings.setAdbNoHistoryByDefault(originalAdbNoHistoryByDefault)
         UiSettings.setFollowScrollIntervalMs(originalFollowScrollIntervalMs)
         UiSettings.setFollowHighRateScrollIntervalMs(originalFollowHighRateScrollIntervalMs)
         UiSettings.setDefaultLogScannerName(originalDefaultLogScannerName)
         followLiveLogsByDefaultCheck.checked = UiSettings.followLiveLogsByDefault
         wrapLogLinesByDefaultCheck.checked = UiSettings.wrapLogLinesByDefault
+        dockerNoHistoryByDefaultCheck.checked = UiSettings.dockerNoHistoryByDefault
+        adbNoHistoryByDefaultCheck.checked = UiSettings.adbNoHistoryByDefault
         followScrollIntervalSpin.value = UiSettings.followScrollIntervalMs
         followHighRateScrollIntervalSpin.value = UiSettings.followHighRateScrollIntervalMs
         defaultScannerCombo.currentIndex = defaultScannerCombo.find(UiSettings.defaultLogScannerName)
@@ -193,6 +203,30 @@ ScrollView {
                         text: qsTr("Wrap long log lines automatically")
                         checked: UiSettings.wrapLogLinesByDefault
                         onToggled: UiSettings.setWrapLogLinesByDefault(checked)
+                    }
+
+                    Label {
+                        text: qsTr("Docker No History")
+                    }
+
+                    CheckBox {
+                        id: dockerNoHistoryByDefaultCheck
+                        Layout.fillWidth: true
+                        text: qsTr("Enable \"no history\" by default for Docker")
+                        checked: UiSettings.dockerNoHistoryByDefault
+                        onToggled: UiSettings.setDockerNoHistoryByDefault(checked)
+                    }
+
+                    Label {
+                        text: qsTr("Logcat No History")
+                    }
+
+                    CheckBox {
+                        id: adbNoHistoryByDefaultCheck
+                        Layout.fillWidth: true
+                        text: qsTr("Enable \"no history\" by default for Logcat")
+                        checked: UiSettings.adbNoHistoryByDefault
+                        onToggled: UiSettings.setAdbNoHistoryByDefault(checked)
                     }
 
                     Label {

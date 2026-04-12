@@ -251,6 +251,13 @@ TEST(AppEngineTests, AppliesConfiguredDefaultWrapToNewSourcesWithoutMetadata) {
   EXPECT_TRUE(engine.wrapLogLinesForSource(url));
 }
 
+TEST(AppEngineTests, NoHistoryDefaultsAreOffByDefault) {
+  ScopedTestSettings scoped_settings;
+
+  EXPECT_FALSE(UiSettings::instance().dockerNoHistoryByDefault());
+  EXPECT_FALSE(UiSettings::instance().adbNoHistoryByDefault());
+}
+
 TEST(AppEngineTests, UsesGenericAsBuiltInDefaultScanner) {
   ScopedTestSettings scoped_settings;
   UiSettings::instance().setDefaultLogScannerName(QStringLiteral("Generic"));
@@ -335,6 +342,24 @@ TEST(AppEngineTests, SystemdJournalUrlPreservesStartAtNowMode) {
   EXPECT_TRUE(spec->start_at_now);
 }
 
+TEST(AppEngineTests, DockerUrlPreservesNoHistoryMode) {
+  const auto url = StreamSource::makeDockerUrl(QStringLiteral("abc123"), QStringLiteral("web"), true);
+  const auto spec = StreamSource::parseDockerSpec(url);
+  ASSERT_TRUE(spec.has_value());
+  EXPECT_EQ(spec->container_id, QStringLiteral("abc123"));
+  EXPECT_EQ(spec->container_name, QStringLiteral("web"));
+  EXPECT_TRUE(spec->no_history);
+}
+
+TEST(AppEngineTests, AdbLogcatUrlPreservesNoHistoryMode) {
+  const auto url = StreamSource::makeAdbLogcatUrl(QStringLiteral("ZX1G22B7"), QStringLiteral("Pixel"), true);
+  const auto spec = StreamSource::parseAdbLogcatSpec(url);
+  ASSERT_TRUE(spec.has_value());
+  EXPECT_EQ(spec->serial, QStringLiteral("ZX1G22B7"));
+  EXPECT_EQ(spec->name, QStringLiteral("Pixel"));
+  EXPECT_TRUE(spec->no_history);
+}
+
 TEST(AppEngineTests, AppliesLogcatScannerToAdbLogcatSources) {
   ScopedTestSettings scoped_settings;
   UiSettings::instance().setDefaultLogScannerName(QStringLiteral("Generic"));
@@ -346,6 +371,34 @@ TEST(AppEngineTests, AppliesLogcatScannerToAdbLogcatSources) {
 
   EXPECT_EQ(model->requestedScannerName(), QStringLiteral("Logcat"));
   engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, OpensDockerStreamWithNoHistoryFlagWhenRequested) {
+  ScopedTestSettings scoped_settings;
+  AppEngine engine;
+
+  const auto index = engine.openLogSource(
+      StreamSource::makeDockerUrl(QStringLiteral("abc123"), QStringLiteral("web"), true));
+  ASSERT_GE(index, 0);
+
+  const auto url = engine.openLogSourceUrlAt(index);
+  const auto spec = StreamSource::parseDockerSpec(url);
+  ASSERT_TRUE(spec.has_value());
+  EXPECT_TRUE(spec->no_history);
+}
+
+TEST(AppEngineTests, OpensAdbStreamWithNoHistoryFlagWhenRequested) {
+  ScopedTestSettings scoped_settings;
+  AppEngine engine;
+
+  const auto index = engine.openLogSource(
+      StreamSource::makeAdbLogcatUrl(QStringLiteral("ZX1G22B7"), QStringLiteral("Pixel"), true));
+  ASSERT_GE(index, 0);
+
+  const auto url = engine.openLogSourceUrlAt(index);
+  const auto spec = StreamSource::parseAdbLogcatSpec(url);
+  ASSERT_TRUE(spec.has_value());
+  EXPECT_TRUE(spec->no_history);
 }
 
 TEST(AppEngineTests, PersistsSourceWrapSettingAlongsideScannerMetadata) {

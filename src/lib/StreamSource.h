@@ -27,12 +27,14 @@ struct DockerStreamSpec {
   QString instance_id;
   QString container_id;
   QString container_name;
+  bool no_history{false};
 };
 
 struct AdbLogcatSpec {
   QString instance_id;
   QString serial;
   QString name;
+  bool no_history{false};
 };
 
 struct SystemdJournalSpec {
@@ -72,10 +74,12 @@ class StreamSource final : public LogSource {
                                         bool include_stderr);
   [[nodiscard]] static std::optional<PipeStreamSpec> parsePipeSpec(const QUrl& url);
   [[nodiscard]] static QUrl makeDockerUrl(const QString& container_id,
-                                          const QString& container_name = {});
+                                          const QString& container_name = {},
+                                          bool no_history = false);
   [[nodiscard]] static std::optional<DockerStreamSpec> parseDockerSpec(const QUrl& url);
   [[nodiscard]] static QUrl makeAdbLogcatUrl(const QString& serial,
-                                             const QString& name = {});
+                                             const QString& name = {},
+                                             bool no_history = false);
   [[nodiscard]] static std::optional<AdbLogcatSpec> parseAdbLogcatSpec(const QUrl& url);
   [[nodiscard]] static QUrl makeSystemdJournalUrl(const QString& process_name = {},
                                                   bool start_at_now = false);

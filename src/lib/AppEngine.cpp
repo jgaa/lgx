@@ -553,10 +553,12 @@ int AppEngine::openPipeStream(const QString& command, bool include_stdout, bool 
 }
 
 int AppEngine::openDockerContainerStream(const QString& container_id,
-                                         const QString& container_name) {
+                                         const QString& container_name,
+                                         bool no_history) {
   LOG_INFO << "Request to open Docker stream for container='"
            << container_id.trimmed().toStdString()
-           << "' name='" << container_name.trimmed().toStdString() << "'";
+           << "' name='" << container_name.trimmed().toStdString()
+           << "' noHistory=" << (no_history ? "true" : "false");
   if (!dockerAvailable() || container_id.trimmed().isEmpty()) {
     LOG_WARN << "Rejecting Docker stream open request. dockerAvailable="
              << (dockerAvailable() ? "true" : "false")
@@ -564,17 +566,18 @@ int AppEngine::openDockerContainerStream(const QString& container_id,
     return -1;
   }
 
-  const auto url = StreamSource::makeDockerUrl(container_id.trimmed(), container_name.trimmed());
+  const auto url = StreamSource::makeDockerUrl(container_id.trimmed(), container_name.trimmed(), no_history);
   LOG_INFO << "Created Docker stream URL '" << url.toString().toStdString() << "'";
   const auto index = openLogSourceInternal(url, false);
   LOG_INFO << "Open Docker stream resolved to tab index=" << index;
   return index;
 }
 
-int AppEngine::openAdbLogcatStream(const QString& serial, const QString& name) {
+int AppEngine::openAdbLogcatStream(const QString& serial, const QString& name, bool no_history) {
   LOG_INFO << "Request to open ADB logcat stream for serial='"
            << serial.trimmed().toStdString()
-           << "' name='" << name.trimmed().toStdString() << "'";
+           << "' name='" << name.trimmed().toStdString()
+           << "' noHistory=" << (no_history ? "true" : "false");
   if (!adbAvailable() || serial.trimmed().isEmpty()) {
     LOG_WARN << "Rejecting ADB logcat open request. adbAvailable="
              << (adbAvailable() ? "true" : "false")
@@ -582,7 +585,7 @@ int AppEngine::openAdbLogcatStream(const QString& serial, const QString& name) {
     return -1;
   }
 
-  const auto url = StreamSource::makeAdbLogcatUrl(serial.trimmed(), name.trimmed());
+  const auto url = StreamSource::makeAdbLogcatUrl(serial.trimmed(), name.trimmed(), no_history);
   LOG_INFO << "Created ADB logcat URL: " << url.toString().toStdString();
   const auto index = openLogSourceInternal(url, false);
   LOG_INFO << "ADB logcat open result index=" << index;
@@ -1390,11 +1393,15 @@ QString AppEngine::titleForUrl(const QUrl& url) {
     const auto label = docker_spec->container_name.isEmpty()
         ? docker_spec->container_id
         : docker_spec->container_name;
-    return QObject::tr("Docker: %1").arg(label);
+    return docker_spec->no_history
+        ? QObject::tr("Docker: %1 (from now)").arg(label)
+        : QObject::tr("Docker: %1").arg(label);
   }
   if (const auto adb_spec = StreamSource::parseAdbLogcatSpec(url); adb_spec.has_value()) {
     const auto label = adb_spec->name.isEmpty() ? adb_spec->serial : adb_spec->name;
-    return QObject::tr("Logcat: %1").arg(label);
+    return adb_spec->no_history
+        ? QObject::tr("Logcat: %1 (from now)").arg(label)
+        : QObject::tr("Logcat: %1").arg(label);
   }
   if (const auto systemd_spec = StreamSource::parseSystemdJournalSpec(url); systemd_spec.has_value()) {
     if (systemd_spec->process_name.isEmpty()) {
@@ -1439,12 +1446,15 @@ QString AppEngine::displaySourceForUrl(const QUrl& url) {
     const auto label = docker_spec->container_name.isEmpty()
         ? docker_spec->container_id
         : docker_spec->container_name;
-    return QObject::tr("Docker container %1 (%2)")
-        .arg(label, docker_spec->container_id);
+    return docker_spec->no_history
+        ? QObject::tr("Docker container %1 (%2) starting now").arg(label, docker_spec->container_id)
+        : QObject::tr("Docker container %1 (%2)").arg(label, docker_spec->container_id);
   }
   if (const auto adb_spec = StreamSource::parseAdbLogcatSpec(url); adb_spec.has_value()) {
     const auto label = adb_spec->name.isEmpty() ? adb_spec->serial : adb_spec->name;
-    return QObject::tr("ADB logcat %1 (%2)").arg(label, adb_spec->serial);
+    return adb_spec->no_history
+        ? QObject::tr("ADB logcat %1 (%2) starting now").arg(label, adb_spec->serial)
+        : QObject::tr("ADB logcat %1 (%2)").arg(label, adb_spec->serial);
   }
   if (const auto systemd_spec = StreamSource::parseSystemdJournalSpec(url); systemd_spec.has_value()) {
     if (systemd_spec->process_name.isEmpty()) {

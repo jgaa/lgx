@@ -110,8 +110,10 @@ class AppEngine : public QObject {
   Q_INVOKABLE int openPipeStream(const QString& command, bool include_stdout, bool include_stderr,
                                  bool remember_in_recents = true);
   Q_INVOKABLE int openDockerContainerStream(const QString& container_id,
-                                            const QString& container_name = {});
-  Q_INVOKABLE int openAdbLogcatStream(const QString& serial, const QString& name = {});
+                                            const QString& container_name = {},
+                                            bool no_history = false);
+  Q_INVOKABLE int openAdbLogcatStream(const QString& serial, const QString& name = {},
+                                      bool no_history = false);
   Q_INVOKABLE int openSystemdJournalStream(const QString& process_name = {},
                                            bool start_at_now = false);
   Q_INVOKABLE int scanAdbExecutables();

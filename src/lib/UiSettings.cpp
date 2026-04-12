@@ -17,6 +17,8 @@ constexpr auto kLogBaseFontPixelSizeKey = "ui/log/baseFontPixelSize";
 constexpr auto kLogZoomPercentKey = "ui/log/zoomPercent";
 constexpr auto kFollowLiveLogsByDefaultKey = "ui/log/followLiveLogsByDefault";
 constexpr auto kWrapLogLinesByDefaultKey = "ui/log/wrapLogLinesByDefault";
+constexpr auto kDockerNoHistoryByDefaultKey = "ui/log/dockerNoHistoryByDefault";
+constexpr auto kAdbNoHistoryByDefaultKey = "ui/log/adbNoHistoryByDefault";
 constexpr auto kFollowScrollIntervalMsKey = "ui/log/followScrollIntervalMs";
 constexpr auto kFollowHighRateScrollIntervalMsKey = "ui/log/followHighRateScrollIntervalMs";
 constexpr auto kDefaultLogScannerNameKey = "ui/log/defaultScannerName";
@@ -173,6 +175,10 @@ UiSettings::UiSettings(QObject* parent)
       settings.value(QLatin1StringView{kFollowLiveLogsByDefaultKey}, true).toBool();
   wrap_log_lines_by_default_ =
       settings.value(QLatin1StringView{kWrapLogLinesByDefaultKey}, false).toBool();
+  docker_no_history_by_default_ =
+      settings.value(QLatin1StringView{kDockerNoHistoryByDefaultKey}, false).toBool();
+  adb_no_history_by_default_ =
+      settings.value(QLatin1StringView{kAdbNoHistoryByDefaultKey}, false).toBool();
   follow_scroll_interval_ms_ = clampFollowScrollIntervalMs(
       settings.value(QLatin1StringView{kFollowScrollIntervalMsKey}, kDefaultFollowScrollIntervalMs).toInt());
   follow_high_rate_scroll_interval_ms_ = clampFollowScrollIntervalMs(
@@ -236,6 +242,14 @@ bool UiSettings::followLiveLogsByDefault() const noexcept {
 
 bool UiSettings::wrapLogLinesByDefault() const noexcept {
   return wrap_log_lines_by_default_;
+}
+
+bool UiSettings::dockerNoHistoryByDefault() const noexcept {
+  return docker_no_history_by_default_;
+}
+
+bool UiSettings::adbNoHistoryByDefault() const noexcept {
+  return adb_no_history_by_default_;
 }
 
 int UiSettings::followScrollIntervalMs() const noexcept {
@@ -352,6 +366,26 @@ void UiSettings::setWrapLogLinesByDefault(bool enabled) {
   wrap_log_lines_by_default_ = enabled;
   saveValue(QLatin1StringView{kWrapLogLinesByDefaultKey}, enabled);
   emit wrapLogLinesByDefaultChanged();
+}
+
+void UiSettings::setDockerNoHistoryByDefault(bool enabled) {
+  if (docker_no_history_by_default_ == enabled) {
+    return;
+  }
+
+  docker_no_history_by_default_ = enabled;
+  saveValue(QLatin1StringView{kDockerNoHistoryByDefaultKey}, enabled);
+  emit dockerNoHistoryByDefaultChanged();
+}
+
+void UiSettings::setAdbNoHistoryByDefault(bool enabled) {
+  if (adb_no_history_by_default_ == enabled) {
+    return;
+  }
+
+  adb_no_history_by_default_ = enabled;
+  saveValue(QLatin1StringView{kAdbNoHistoryByDefaultKey}, enabled);
+  emit adbNoHistoryByDefaultChanged();
 }
 
 void UiSettings::setFollowScrollIntervalMs(int interval_ms) {

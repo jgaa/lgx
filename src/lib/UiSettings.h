@@ -20,6 +20,8 @@ class UiSettings : public QObject {
   Q_PROPERTY(int effectiveLogFontPixelSize READ effectiveLogFontPixelSize NOTIFY effectiveLogFontPixelSizeChanged)
   Q_PROPERTY(bool followLiveLogsByDefault READ followLiveLogsByDefault WRITE setFollowLiveLogsByDefault NOTIFY followLiveLogsByDefaultChanged)
   Q_PROPERTY(bool wrapLogLinesByDefault READ wrapLogLinesByDefault WRITE setWrapLogLinesByDefault NOTIFY wrapLogLinesByDefaultChanged)
+  Q_PROPERTY(bool dockerNoHistoryByDefault READ dockerNoHistoryByDefault WRITE setDockerNoHistoryByDefault NOTIFY dockerNoHistoryByDefaultChanged)
+  Q_PROPERTY(bool adbNoHistoryByDefault READ adbNoHistoryByDefault WRITE setAdbNoHistoryByDefault NOTIFY adbNoHistoryByDefaultChanged)
   Q_PROPERTY(int followScrollIntervalMs READ followScrollIntervalMs WRITE setFollowScrollIntervalMs NOTIFY followScrollIntervalMsChanged)
   Q_PROPERTY(int followHighRateScrollIntervalMs READ followHighRateScrollIntervalMs WRITE setFollowHighRateScrollIntervalMs NOTIFY followHighRateScrollIntervalMsChanged)
   Q_PROPERTY(QStringList availableLogScannerNames READ availableLogScannerNames CONSTANT)
@@ -45,6 +47,8 @@ class UiSettings : public QObject {
   [[nodiscard]] int effectiveLogFontPixelSize() const noexcept;
   [[nodiscard]] bool followLiveLogsByDefault() const noexcept;
   [[nodiscard]] bool wrapLogLinesByDefault() const noexcept;
+  [[nodiscard]] bool dockerNoHistoryByDefault() const noexcept;
+  [[nodiscard]] bool adbNoHistoryByDefault() const noexcept;
   [[nodiscard]] int followScrollIntervalMs() const noexcept;
   [[nodiscard]] int followHighRateScrollIntervalMs() const noexcept;
   [[nodiscard]] QStringList availableLogScannerNames() const;
@@ -63,6 +67,8 @@ class UiSettings : public QObject {
   Q_INVOKABLE void setLogZoomPercent(int percent);
   Q_INVOKABLE void setFollowLiveLogsByDefault(bool enabled);
   Q_INVOKABLE void setWrapLogLinesByDefault(bool enabled);
+  Q_INVOKABLE void setDockerNoHistoryByDefault(bool enabled);
+  Q_INVOKABLE void setAdbNoHistoryByDefault(bool enabled);
   Q_INVOKABLE void setFollowScrollIntervalMs(int interval_ms);
   Q_INVOKABLE void setFollowHighRateScrollIntervalMs(int interval_ms);
   Q_INVOKABLE void setDefaultLogScannerName(const QString& name);
@@ -83,6 +89,8 @@ signals:
   void effectiveLogFontPixelSizeChanged();
   void followLiveLogsByDefaultChanged();
   void wrapLogLinesByDefaultChanged();
+  void dockerNoHistoryByDefaultChanged();
+  void adbNoHistoryByDefaultChanged();
   void followScrollIntervalMsChanged();
   void followHighRateScrollIntervalMsChanged();
   void defaultLogScannerNameChanged();
@@ -112,6 +120,8 @@ signals:
   int log_zoom_percent_{100};
   bool follow_live_logs_by_default_{true};
   bool wrap_log_lines_by_default_{false};
+  bool docker_no_history_by_default_{false};
+  bool adb_no_history_by_default_{false};
   int follow_scroll_interval_ms_{300};
   int follow_high_rate_scroll_interval_ms_{5000};
   QStringList available_log_scanner_names_;
