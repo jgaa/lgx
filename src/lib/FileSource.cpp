@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
@@ -41,6 +42,17 @@ std::string_view sliceSpan(std::string_view text, ParsedSpan span) noexcept {
   }
 
   return text.substr(start, std::min(length, text.size() - start));
+}
+
+TextSpan toTextSpan(ParsedSpan span) noexcept {
+  if (!span.valid()) {
+    return {};
+  }
+
+  return TextSpan{
+      .offset = static_cast<int32_t>(span.start),
+      .length = span.length,
+  };
 }
 
 }  // namespace
@@ -225,6 +237,10 @@ SourceSnapshot FileSource::snapshot() const {
       .indexed_size = scanned_size_,
       .file_size = fileSize(),
       .following = following_,
+      .catching_up = state_ == SourceState::Opening
+          || state_ == SourceState::Indexing
+          || state_ == SourceState::Updating
+          || state_ == SourceState::ResetDetected,
       .lines_per_second = linesPerSecond(),
   };
 }
@@ -244,6 +260,43 @@ void FileSource::fetchLines(uint64_t first_line, size_t count,
   } catch (const std::exception& ex) {
     emitError(ex.what());
     on_ready({});
+  }
+}
+
+std::optional<SourceLineView> FileSource::lineViewAt(uint64_t line_number) {
+  if (line_number >= lines_.size()) {
+    return std::nullopt;
+  }
+
+  const auto page_index = static_cast<size_t>(lines_[static_cast<size_t>(line_number)].page_index);
+  ensurePageDeepParsed(page_index);
+  const auto page = pageSnapshot(page_index);
+  return buildLineView(static_cast<size_t>(line_number), page);
+}
+
+void FileSource::visitLineViews(uint64_t first_line, size_t count,
+                                std::function<bool(const SourceLineView&)> visitor) {
+  if (!visitor || count == 0 || first_line >= lines_.size()) {
+    return;
+  }
+
+  const auto available = lines_.size() - static_cast<size_t>(first_line);
+  const auto actual_count = std::min(count, available);
+  size_t current_page_index = std::numeric_limits<size_t>::max();
+  PageDataPtr current_page;
+
+  for (size_t offset = 0; offset < actual_count; ++offset) {
+    const auto line_index = static_cast<size_t>(first_line) + offset;
+    const auto page_index = static_cast<size_t>(lines_[line_index].page_index);
+    if (page_index != current_page_index) {
+      ensurePageDeepParsed(page_index);
+      current_page = pageSnapshot(page_index);
+      current_page_index = page_index;
+    }
+
+    if (!visitor(buildLineView(line_index, current_page))) {
+      break;
+    }
   }
 }
 
@@ -588,6 +641,77 @@ void FileSource::handleWatchHint(FileEventHint) {
   }
 
   refresh();
+}
+
+PageDataPtr FileSource::pageSnapshot(size_t page_index) const {
+  return QCoro::waitFor(loadPageViaCache(
+      page_index, [this, page_index]() { return loadPageSnapshot(page_index); }));
+}
+
+void FileSource::ensurePageDeepParsed(size_t page_index) {
+  if (page_index >= pageMetadata().size()) {
+    return;
+  }
+
+  const auto first_line = pageMetadata()[page_index].firstLine();
+  const auto line_count = pageMetadata()[page_index].lines();
+  bool needs_parse = false;
+  for (size_t index = 0; index < line_count; ++index) {
+    if (!lines_[first_line + index].deep_parsed) {
+      needs_parse = true;
+      break;
+    }
+  }
+  if (!needs_parse) {
+    return;
+  }
+
+  const auto page = pageSnapshot(page_index);
+  const auto& page_meta = pageMetadata()[page_index];
+  const auto& line_index = page_meta.ensureLineIndex([this, page]() {
+    auto built = std::make_unique<PageMeta::LineIndex>();
+    const auto bytes = page->bytes();
+    built->lines = scanner_->buildLineIndex(std::string_view(bytes.data(), bytes.size()));
+    return built;
+  });
+
+  const auto parsed_count = std::min(line_count, line_index.lines.size());
+  for (size_t index = 0; index < parsed_count; ++index) {
+    auto& line = lines_[first_line + index];
+    if (line.deep_parsed) {
+      continue;
+    }
+
+    const auto& parsed = line_index.lines[index];
+    line.log_level = parsed.log_level;
+    line.pid = parsed.pid;
+    line.tid = parsed.tid;
+    line.function_name = toTextSpan(parsed.function_name);
+    line.message = toTextSpan(parsed.message);
+    line.thread_id = toTextSpan(parsed.thread_id);
+    line.timestamp_msecs_since_epoch = parsed.has_timestamp ? parsed.timestamp_msecs_since_epoch : -1;
+    line.deep_parsed = true;
+  }
+
+  for (size_t index = parsed_count; index < line_count; ++index) {
+    lines_[first_line + index].deep_parsed = true;
+  }
+}
+
+SourceLineView FileSource::buildLineView(size_t line_index, const PageDataPtr& page) const {
+  const auto& line = lines_[line_index];
+  SourceLineView view;
+  view.line_number = line_index;
+  view.log_level = line.log_level;
+  view.pid = line.pid;
+  view.tid = line.tid;
+  view.function_name = line.function_name;
+  view.message = line.message;
+  view.thread_id = line.thread_id;
+  view.timestamp_msecs_since_epoch = line.timestamp_msecs_since_epoch;
+  view.page = page;
+  view.line_index_in_page = line.line_index_in_page;
+  return view;
 }
 
 QCoro::Task<PageDataPtr> FileSource::loadPageSnapshot(size_t page_index) const {

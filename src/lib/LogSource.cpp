@@ -4,6 +4,69 @@
 
 namespace lgx {
 
+namespace {
+
+std::string_view sliceSpan(std::string_view text, TextSpan span) noexcept {
+  if (!span.isSet()) {
+    return {};
+  }
+
+  const auto start = static_cast<size_t>(span.offset);
+  const auto length = static_cast<size_t>(span.length);
+  if (start >= text.size()) {
+    return {};
+  }
+
+  return text.substr(start, std::min(length, text.size() - start));
+}
+
+}  // namespace
+
+std::string_view SourceLineView::rawText() const noexcept {
+  if (page) {
+    return page->lineAt(line_index_in_page);
+  }
+  if (owned_raw_text) {
+    return *owned_raw_text;
+  }
+  return {};
+}
+
+std::string_view SourceLineView::functionNameText() const noexcept {
+  if (page) {
+    return sliceSpan(rawText(), function_name);
+  }
+  if (owned_function_name) {
+    return *owned_function_name;
+  }
+  return {};
+}
+
+std::string_view SourceLineView::messageText() const noexcept {
+  if (page) {
+    return sliceSpan(rawText(), message);
+  }
+  if (owned_message) {
+    return *owned_message;
+  }
+  return {};
+}
+
+std::string_view SourceLineView::plainText() const noexcept {
+  const auto message_text = messageText();
+  return message_text.empty() ? rawText() : message_text;
+}
+
+std::string_view SourceLineView::threadIdText() const noexcept {
+  if (page) {
+    return sliceSpan(rawText(), thread_id);
+  }
+  if (owned_thread_id) {
+    return *owned_thread_id;
+  }
+  return {};
+}
+
 std::atomic_size_t LogSource::source_id_feed_{0};
 
 size_t LogSource::PageMeta::levelLines(LogLevel level) const noexcept {
@@ -82,6 +145,55 @@ double LogSource::linesPerSecond() const {
 void LogSource::fetchLines(uint64_t, size_t, std::function<void(SourceLines)> on_ready) {
   if (on_ready) {
     on_ready({});
+  }
+}
+
+std::optional<SourceLineView> LogSource::lineViewAt(uint64_t line_number) {
+  std::optional<SourceLineView> result;
+  fetchLines(line_number, 1, [&result](SourceLines lines) {
+    if (lines.lines.empty()) {
+      return;
+    }
+
+    const auto& line = lines.lines.front();
+    SourceLineView view;
+    view.line_number = line.line_number;
+    view.log_level = line.log_level;
+    view.pid = line.pid;
+    view.tid = line.tid;
+    view.owned_raw_text = std::make_shared<std::string>(line.text);
+    if (!line.function_name.empty()) {
+      view.owned_function_name = std::make_shared<std::string>(line.function_name);
+    }
+    if (!line.message.empty()) {
+      view.owned_message = std::make_shared<std::string>(line.message);
+    }
+    if (!line.thread_id.empty()) {
+      view.owned_thread_id = std::make_shared<std::string>(line.thread_id);
+    }
+    if (line.timestamp.has_value()) {
+      view.timestamp_msecs_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(
+          line.timestamp->time_since_epoch()).count();
+    }
+    result = std::move(view);
+  });
+  return result;
+}
+
+void LogSource::visitLineViews(uint64_t first_line, size_t count,
+                               std::function<bool(const SourceLineView&)> visitor) {
+  if (!visitor || count == 0) {
+    return;
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    const auto view = lineViewAt(first_line + index);
+    if (!view.has_value()) {
+      continue;
+    }
+    if (!visitor(*view)) {
+      break;
+    }
   }
 }
 

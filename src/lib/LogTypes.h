@@ -57,4 +57,13 @@ struct LogRow {
   QString thread_id;
 };
 
+struct TextSpan {
+  int32_t offset{-1};
+  uint32_t length{};
+
+  [[nodiscard]] bool isSet() const noexcept {
+    return offset >= 0;
+  }
+};
+
 }  // namespace lgx

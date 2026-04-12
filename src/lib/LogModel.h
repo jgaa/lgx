@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
+#include <optional>
 
 #include <QAbstractListModel>
 #include <QTimer>
@@ -27,6 +29,8 @@ class LogModel final : public QAbstractListModel {
   Q_PROPERTY(int lineCount READ rowCount NOTIFY lineCountChanged)
   Q_PROPERTY(bool following READ following WRITE setFollowing NOTIFY followingChanged)
   Q_PROPERTY(bool active READ active NOTIFY activeChanged)
+  Q_PROPERTY(bool catchingUp READ catchingUp NOTIFY sourceStatusChanged)
+  Q_PROPERTY(bool live READ live NOTIFY sourceStatusChanged)
   Q_PROPERTY(QString scannerName READ scannerName NOTIFY scannerNameChanged)
   Q_PROPERTY(QString requestedScannerName READ requestedScannerName WRITE setRequestedScannerName NOTIFY scannerNameChanged)
   Q_PROPERTY(double linesPerSecond READ linesPerSecond NOTIFY linesPerSecondChanged)
@@ -90,6 +94,8 @@ class LogModel final : public QAbstractListModel {
   [[nodiscard]] LogSource* source() const noexcept;
   [[nodiscard]] bool following() const noexcept;
   [[nodiscard]] bool active() const noexcept;
+  [[nodiscard]] bool catchingUp() const noexcept;
+  [[nodiscard]] bool live() const noexcept;
   [[nodiscard]] QString scannerName() const;
   [[nodiscard]] QString requestedScannerName() const;
   [[nodiscard]] double linesPerSecond() const noexcept;
@@ -140,6 +146,7 @@ signals:
   void stateChanged();
   void followingChanged();
   void activeChanged();
+  void sourceStatusChanged();
   void scannerNameChanged();
   void linesPerSecondChanged();
   void fileSizeChanged();
@@ -151,21 +158,28 @@ signals:
   void markActiveForRecentLines();
   void setActive(bool active);
   void refreshSourceMetrics();
-  void replaceRowsFromSource();
-  void appendRowsFromSource(uint64_t first_line, uint64_t count);
-  void syncRowsFromSourceSnapshot();
+  void syncSourceRowCount(uint64_t next_row_count, bool force_reset = false);
+  [[nodiscard]] std::optional<SourceLineView> lineViewAt(int row) const;
+  void beginCatchUp();
+  void logSourceReady(uint64_t line_count);
+  void updateSourceStatus(const SourceSnapshot& snapshot);
+  void setCatchingUp(bool catching_up);
   void setState(State state);
 
   QUrl source_url_;
   State state_{INITIALIZING};
   std::vector<LogRow> rows_;
+  std::unordered_map<int, LineMarkColor> marked_rows_;
   std::unique_ptr<LogSource> source_;
   bool reset_pending_{false};
   bool following_{false};
   bool active_{false};
   bool current_{false};
+  bool catching_up_{true};
   double lines_per_second_{0.0};
   qulonglong file_size_{0};
+  int row_count_cache_{0};
+  std::optional<std::chrono::steady_clock::time_point> catch_up_started_at_;
   QTimer active_timer_;
   QTimer source_metrics_timer_;
 };

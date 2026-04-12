@@ -100,6 +100,9 @@ class StreamSource final : public LogSource {
   [[nodiscard]] double linesPerSecond() const override;
   void fetchLines(uint64_t first_line, size_t count,
                   std::function<void(SourceLines)> on_ready) override;
+  [[nodiscard]] std::optional<SourceLineView> lineViewAt(uint64_t line_number) override;
+  void visitLineViews(uint64_t first_line, size_t count,
+                      std::function<bool(const SourceLineView&)> visitor) override;
   [[nodiscard]] std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
                                                           LogLevel level) const override;
   [[nodiscard]] std::optional<uint64_t> previousLineWithLevel(uint64_t before_line,
@@ -112,6 +115,8 @@ class StreamSource final : public LogSource {
   void clearSpoolDirectory();
   void enqueueProviderBytes(QByteArray bytes);
   void flushPendingBytes();
+  void completeInitialCatchUp();
+  [[nodiscard]] bool sourceStartsLive(const QUrl& url) const;
   void fail(QString message);
 
   FileSource spool_source_{std::shared_ptr<IFileMonitor>{}};
@@ -121,9 +126,11 @@ class StreamSource final : public LogSource {
   QByteArray pending_bytes_;
   QString spool_path_;
   std::unique_ptr<IStreamProvider> provider_;
+  QTimer catch_up_idle_timer_;
   bool following_{false};
   bool failed_{false};
   bool open_{false};
+  bool catching_up_{false};
 };
 
 }  // namespace lgx

@@ -39,6 +39,9 @@ class FileSource final : public LogSource {
   [[nodiscard]] uint64_t fileSize() const override;
   void fetchLines(uint64_t first_line, size_t count,
                   std::function<void(SourceLines)> on_ready) override;
+  [[nodiscard]] std::optional<SourceLineView> lineViewAt(uint64_t line_number) override;
+  void visitLineViews(uint64_t first_line, size_t count,
+                      std::function<bool(const SourceLineView&)> visitor) override;
   [[nodiscard]] std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
                                                           LogLevel level) const override;
   [[nodiscard]] std::optional<uint64_t> previousLineWithLevel(uint64_t before_line,
@@ -65,6 +68,13 @@ class FileSource final : public LogSource {
     uint32_t page_index{};
     uint32_t line_index_in_page{};
     LogLevel log_level{LogLevel_Info};
+    uint32_t pid{};
+    uint32_t tid{};
+    int64_t timestamp_msecs_since_epoch{-1};
+    TextSpan function_name;
+    TextSpan message;
+    TextSpan thread_id;
+    bool deep_parsed{false};
   };
 
   [[nodiscard]] static FileInfo statPath(const std::string& path);
@@ -81,6 +91,9 @@ class FileSource final : public LogSource {
   void startWatching();
   void stopWatching();
   void handleWatchHint(FileEventHint hint);
+  [[nodiscard]] PageDataPtr pageSnapshot(size_t page_index) const;
+  void ensurePageDeepParsed(size_t page_index);
+  [[nodiscard]] SourceLineView buildLineView(size_t line_index, const PageDataPtr& page) const;
   [[nodiscard]] QCoro::Task<PageDataPtr> loadPageSnapshot(size_t page_index) const;
   [[nodiscard]] PageDataPtr readPageSnapshot(size_t page_index) const;
   [[nodiscard]] SourceLines collectLines(uint64_t first_line, size_t count) const;

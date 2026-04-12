@@ -20,6 +20,8 @@
 
 namespace lgx {
 
+class PageData;
+
 enum class SourceState {
   Idle,
   Opening,
@@ -48,6 +50,32 @@ struct SourceLine {
   std::optional<std::chrono::system_clock::time_point> timestamp;
 };
 
+struct SourceLineView {
+  uint64_t line_number{};
+  LogLevel log_level{LogLevel_Info};
+  uint32_t pid{};
+  uint32_t tid{};
+  TextSpan function_name;
+  TextSpan message;
+  TextSpan thread_id;
+  int64_t timestamp_msecs_since_epoch{-1};
+  std::shared_ptr<const PageData> page;
+  uint32_t line_index_in_page{};
+  std::shared_ptr<std::string> owned_raw_text;
+  std::shared_ptr<std::string> owned_function_name;
+  std::shared_ptr<std::string> owned_message;
+  std::shared_ptr<std::string> owned_thread_id;
+
+  [[nodiscard]] std::string_view rawText() const noexcept;
+  [[nodiscard]] std::string_view functionNameText() const noexcept;
+  [[nodiscard]] std::string_view messageText() const noexcept;
+  [[nodiscard]] std::string_view plainText() const noexcept;
+  [[nodiscard]] std::string_view threadIdText() const noexcept;
+  [[nodiscard]] bool hasTimestamp() const noexcept {
+    return timestamp_msecs_since_epoch >= 0;
+  }
+};
+
 struct SourceLines {
   uint64_t first_line{};
   std::vector<SourceLine> lines;
@@ -59,6 +87,7 @@ struct SourceSnapshot {
   uint64_t indexed_size{};
   uint64_t file_size{};
   bool following{false};
+  bool catching_up{false};
   double lines_per_second{};
 };
 
@@ -147,6 +176,9 @@ class LogSource {
   [[nodiscard]] virtual double linesPerSecond() const;
   virtual void fetchLines(uint64_t first_line, size_t count,
                           std::function<void(SourceLines)> on_ready);
+  [[nodiscard]] virtual std::optional<SourceLineView> lineViewAt(uint64_t line_number);
+  virtual void visitLineViews(uint64_t first_line, size_t count,
+                              std::function<bool(const SourceLineView&)> visitor);
   [[nodiscard]] virtual std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
                                                                   LogLevel level) const;
   [[nodiscard]] virtual std::optional<uint64_t> previousLineWithLevel(

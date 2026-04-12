@@ -978,14 +978,13 @@ QVariantList AppEngine::logcatProcessesForSource(const QUrl& url) const {
   QSet<int> active_pids;
   if (auto* source = model->source()) {
     const auto snapshot = source->snapshot();
-    source->fetchLines(0, static_cast<size_t>(snapshot.line_count),
-                       [&active_pids](SourceLines lines) {
-                         for (const auto& line : lines.lines) {
-                           if (line.pid > 0) {
-                             active_pids.insert(static_cast<int>(line.pid));
-                           }
-                         }
-                       });
+    source->visitLineViews(0, static_cast<size_t>(snapshot.line_count),
+                           [&active_pids](const SourceLineView& line) {
+                             if (line.pid > 0) {
+                               active_pids.insert(static_cast<int>(line.pid));
+                             }
+                             return true;
+                           });
   } else {
     for (int row = 0; row < model->rowCount(); ++row) {
       const int pid = model->pidAt(row);
@@ -1071,24 +1070,25 @@ QVariantList AppEngine::systemdProcessesForSource(const QUrl& url) const {
   }
 
   QSet<QString> active_processes;
-  for (int row = 0; row < model->rowCount(); ++row) {
-    const auto name = model->functionNameAt(row).trimmed();
-    if (!name.isEmpty()) {
-      active_processes.insert(name);
-    }
-  }
-
   if (auto* source = model->source()) {
     const auto snapshot = source->snapshot();
-    source->fetchLines(0, static_cast<size_t>(snapshot.line_count),
-                       [&active_processes](SourceLines lines) {
-                         for (const auto& line : lines.lines) {
-                           const auto name = QString::fromStdString(line.function_name).trimmed();
-                           if (!name.isEmpty()) {
-                             active_processes.insert(name);
-                           }
-                         }
-                       });
+    source->visitLineViews(0, static_cast<size_t>(snapshot.line_count),
+                           [&active_processes](const SourceLineView& line) {
+                             const auto name = QString::fromUtf8(
+                                 line.functionNameText().data(),
+                                 static_cast<qsizetype>(line.functionNameText().size())).trimmed();
+                             if (!name.isEmpty()) {
+                               active_processes.insert(name);
+                             }
+                             return true;
+                           });
+  } else {
+    for (int row = 0; row < model->rowCount(); ++row) {
+      const auto name = model->functionNameAt(row).trimmed();
+      if (!name.isEmpty()) {
+        active_processes.insert(name);
+      }
+    }
   }
 
   QStringList names;

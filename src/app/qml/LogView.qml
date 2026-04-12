@@ -305,6 +305,21 @@ Item {
             ensureFollowingAtEnd()
         }
     }
+    Connections {
+        target: root.logModel
+
+        function onSourceStatusChanged() {
+            if (root.following && root.logModel && root.logModel.live) {
+                root.ensureFollowingAtEnd()
+            }
+        }
+
+        function onStateChanged() {
+            if (root.following && root.logModel && root.logModel.live) {
+                root.ensureFollowingAtEnd()
+            }
+        }
+    }
     Component.onCompleted: {
         acquireLogModel()
         registerWithWorkspace()
@@ -332,6 +347,7 @@ Item {
         id: lineList
         anchors.fill: parent
         anchors.margins: 4
+        visible: !(root.logModel && root.logModel.catchingUp)
         rowModel: root.logModel
         wrapLogLines: root.wrapLogLines
         followMode: root.following
@@ -346,6 +362,38 @@ Item {
         onUpwardScrollBarNavigationRequested: {
             if (root.following) {
                 root.setFollowing(false)
+            }
+        }
+    }
+
+    Item {
+        anchors.fill: parent
+        visible: !!root.logModel && root.logModel.catchingUp
+        z: 1
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#d3d7dd"
+        }
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 14
+
+            BusyIndicator {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 28
+                height: 28
+                running: parent.visible
+                palette.dark: "#d97706"
+                palette.mid: "#f59e0b"
+                palette.light: "#fbbf24"
+            }
+
+            Label {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("Catching up…")
+                color: "#6c655c"
             }
         }
     }

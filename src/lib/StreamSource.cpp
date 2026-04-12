@@ -569,6 +569,11 @@ StreamSource::StreamSource() {
   QObject::connect(&flush_timer_, &QTimer::timeout, &flush_timer_, [this]() {
     flushPendingBytes();
   });
+  catch_up_idle_timer_.setSingleShot(true);
+  catch_up_idle_timer_.setInterval(250);
+  QObject::connect(&catch_up_idle_timer_, &QTimer::timeout, &catch_up_idle_timer_, [this]() {
+    completeInitialCatchUp();
+  });
 }
 
 StreamSource::~StreamSource() {
@@ -734,9 +739,10 @@ void StreamSource::setCallbacks(SourceCallbacks callbacks) {
   LogSource::setCallbacks(std::move(callbacks));
   spool_source_.setCallbacks(SourceCallbacks{
       .on_state_changed =
-          [this](SourceSnapshot snapshot) {
-            snapshot.following = following_;
-            emitStateChanged(snapshot);
+          [this](SourceSnapshot) {
+            auto next_snapshot = snapshot();
+            next_snapshot.following = following_;
+            emitStateChanged(next_snapshot);
           },
       .on_lines_appended =
           [this](uint64_t first_new_line, uint64_t count) {
@@ -784,6 +790,9 @@ void StreamSource::open(const std::string& path) {
   provider_->setCallbacks(IStreamProvider::Callbacks{
       .on_bytes =
           [this](QByteArray bytes) {
+            if (catching_up_) {
+              catch_up_idle_timer_.start();
+            }
             enqueueProviderBytes(std::move(bytes));
           },
       .on_error =
@@ -799,6 +808,10 @@ void StreamSource::open(const std::string& path) {
 
   spool_source_.open(spool_path_.toStdString());
   LOG_INFO << "Stream spool file ready at '" << spool_path_.toStdString() << "'";
+  catching_up_ = !sourceStartsLive(url);
+  if (catching_up_) {
+    catch_up_idle_timer_.start();
+  }
   provider_->start();
   open_ = true;
 }
@@ -815,6 +828,8 @@ void StreamSource::closeInternal(bool invalidate_pages) {
 
   open_ = false;
   flush_timer_.stop();
+  catch_up_idle_timer_.stop();
+  catching_up_ = false;
   if (provider_) {
     provider_->setCallbacks({});
     provider_->stop();
@@ -873,6 +888,7 @@ void StreamSource::setRequestedScannerName(std::string name) {
 SourceSnapshot StreamSource::snapshot() const {
   auto source_snapshot = spool_source_.snapshot();
   source_snapshot.following = following_;
+  source_snapshot.catching_up = source_snapshot.catching_up || catching_up_;
   if (failed_) {
     source_snapshot.state = SourceState::Failed;
   }
@@ -890,6 +906,15 @@ double StreamSource::linesPerSecond() const {
 void StreamSource::fetchLines(uint64_t first_line, size_t count,
                               std::function<void(SourceLines)> on_ready) {
   spool_source_.fetchLines(first_line, count, std::move(on_ready));
+}
+
+std::optional<SourceLineView> StreamSource::lineViewAt(uint64_t line_number) {
+  return spool_source_.lineViewAt(line_number);
+}
+
+void StreamSource::visitLineViews(uint64_t first_line, size_t count,
+                                  std::function<bool(const SourceLineView&)> visitor) {
+  spool_source_.visitLineViews(first_line, count, std::move(visitor));
 }
 
 std::optional<uint64_t> StreamSource::nextLineWithLevel(uint64_t after_line,
@@ -1018,6 +1043,35 @@ void StreamSource::fail(QString message) {
   LOG_ERROR << "Stream source failed: " << message.toStdString();
   emitError(message.toStdString());
   emitStateChanged(snapshot());
+}
+
+void StreamSource::completeInitialCatchUp() {
+  if (!catching_up_) {
+    return;
+  }
+
+  catching_up_ = false;
+  emitStateChanged(snapshot());
+}
+
+bool StreamSource::sourceStartsLive(const QUrl& url) const {
+  if (url.scheme() == QLatin1StringView{kPipeScheme}) {
+    return true;
+  }
+
+  if (const auto docker = parseDockerSpec(url); docker.has_value()) {
+    return docker->no_history;
+  }
+
+  if (const auto adb = parseAdbLogcatSpec(url); adb.has_value()) {
+    return adb->no_history;
+  }
+
+  if (const auto systemd = parseSystemdJournalSpec(url); systemd.has_value()) {
+    return systemd->start_at_now;
+  }
+
+  return false;
 }
 
 }  // namespace lgx

@@ -1,11 +1,21 @@
 #include "FilterModel.h"
 
 #include <algorithm>
+#include <string>
+#include <string_view>
 
 #include <QSet>
 #include <QVariantMap>
 
 namespace lgx {
+
+namespace {
+
+bool containsText(std::string_view haystack, std::string_view needle) {
+  return needle.empty() || haystack.find(needle) != std::string_view::npos;
+}
+
+}
 
 FilterModel::FilterModel(LogModel* source_model, QObject* parent)
     : QAbstractListModel(parent),
@@ -202,24 +212,25 @@ QVariantList FilterModel::systemdProcesses() const {
   }
 
   QSet<QString> active_processes;
-  for (int row = 0; row < source_model_->rowCount(); ++row) {
-    const auto name = source_model_->functionNameAt(row).trimmed();
-    if (!name.isEmpty()) {
-      active_processes.insert(name);
-    }
-  }
-
   if (auto* source = source_model_->source()) {
     const auto snapshot = source->snapshot();
-    source->fetchLines(0, static_cast<size_t>(snapshot.line_count),
-                       [&active_processes](SourceLines lines) {
-                         for (const auto& line : lines.lines) {
-                           const auto name = QString::fromStdString(line.function_name).trimmed();
-                           if (!name.isEmpty()) {
-                             active_processes.insert(name);
-                           }
-                         }
-                       });
+    source->visitLineViews(0, static_cast<size_t>(snapshot.line_count),
+                           [&active_processes](const SourceLineView& line) {
+                             const auto name = QString::fromUtf8(
+                                 line.functionNameText().data(),
+                                 static_cast<qsizetype>(line.functionNameText().size())).trimmed();
+                             if (!name.isEmpty()) {
+                               active_processes.insert(name);
+                             }
+                             return true;
+                           });
+  } else {
+    for (int row = 0; row < source_model_->rowCount(); ++row) {
+      const auto name = source_model_->functionNameAt(row).trimmed();
+      if (!name.isEmpty()) {
+        active_processes.insert(name);
+      }
+    }
   }
 
   QStringList names;
@@ -411,6 +422,54 @@ bool FilterModel::matchesSourceRow(int source_row) const {
   if (!any_level_enabled && !has_text_filter && selected_pid_ == 0
       && selected_process_name_.isEmpty()) {
     return true;
+  }
+
+  if (auto* source = source_model_->source()) {
+    const auto view = source->lineViewAt(static_cast<uint64_t>(source_row));
+    if (!view.has_value()) {
+      return false;
+    }
+
+    if (selected_pid_ > 0 && static_cast<int>(view->pid) != selected_pid_) {
+      return false;
+    }
+
+    if (!selected_process_name_.isEmpty()
+        && QString::compare(QString::fromUtf8(view->functionNameText().data(),
+                                              static_cast<qsizetype>(view->functionNameText().size())),
+                            selected_process_name_, Qt::CaseSensitive) != 0) {
+      return false;
+    }
+
+    if (any_level_enabled) {
+      const int level = static_cast<int>(view->log_level);
+      if (level < 0 || level >= static_cast<int>(enabled_levels_.size())
+          || !enabled_levels_.at(static_cast<size_t>(level))) {
+        return false;
+      }
+    }
+
+    if (!has_text_filter) {
+      return true;
+    }
+
+    if (!regex_ && !case_insensitive_) {
+      const auto needle = pattern_.toUtf8();
+      return containsText(view->plainText(),
+                          std::string_view(needle.constData(), static_cast<size_t>(needle.size())));
+    }
+
+    const QString text = QString::fromUtf8(view->plainText().data(),
+                                           static_cast<qsizetype>(view->plainText().size()));
+    if (!regex_) {
+      return text.contains(pattern_, case_insensitive_ ? Qt::CaseInsensitive : Qt::CaseSensitive);
+    }
+
+    if (!compiled_regex_.isValid()) {
+      return false;
+    }
+
+    return compiled_regex_.match(text).hasMatch();
   }
 
   if (selected_pid_ > 0 && source_model_->pidAt(source_row) != selected_pid_) {

@@ -1,6 +1,8 @@
 #include "LogModel.h"
+#include "logging.h"
 
 #include <algorithm>
+#include <limits>
 
 #include <QDateTime>
 
@@ -24,6 +26,17 @@ LogRow makeRow(const SourceLine& line) {
                              : QDateTime{},
       .thread_id = QString::fromStdString(line.thread_id),
   };
+}
+
+QString fromView(std::string_view value) {
+  return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
+}
+
+QString sourceLabel(const QUrl& source_url) {
+  if (source_url.isLocalFile()) {
+    return source_url.toLocalFile();
+  }
+  return source_url.toString();
 }
 
 }  // namespace
@@ -60,12 +73,53 @@ int LogModel::rowCount(const QModelIndex& parent) const {
     return 0;
   }
 
-  return static_cast<int>(rows_.size());
+  return source_ ? row_count_cache_ : static_cast<int>(rows_.size());
 }
 
 QVariant LogModel::data(const QModelIndex& index, int role) const {
   if (!index.isValid() || index.row() < 0 || index.row() >= rowCount()) {
     return {};
+  }
+
+  const auto mark_color = markColorAt(index.row());
+  if (source_) {
+    const auto view = lineViewAt(index.row());
+    if (!view.has_value()) {
+      return {};
+    }
+
+    switch (role) {
+      case SourceRowRole:
+        return index.row();
+      case LineNoRole:
+        return QVariant::fromValue(static_cast<qsizetype>(view->line_number + 1U));
+      case FunctionNameRole:
+        return fromView(view->functionNameText());
+      case LogLevelRole:
+        return QVariant::fromValue(static_cast<int>(view->log_level));
+      case PidRole:
+        return QVariant::fromValue(static_cast<qint64>(view->pid));
+      case TidRole:
+        return QVariant::fromValue(static_cast<qint64>(view->tid));
+      case MarkedRole:
+        return mark_color != static_cast<int>(LineMark_None);
+      case MarkColorRole:
+        return QVariant::fromValue(mark_color);
+      case RawMessageRole:
+        return fromView(view->rawText());
+      case MessageRole:
+        return fromView(view->plainText());
+      case DateRole:
+        return view->hasTimestamp()
+            ? QVariant::fromValue(QDateTime::fromMSecsSinceEpoch(view->timestamp_msecs_since_epoch))
+            : QVariant::fromValue(QDateTime{});
+      case TagsRole:
+        return QStringList{};
+      case ThreadIdRole:
+        return fromView(view->threadIdText());
+      default:
+        return {};
+    }
   }
 
   const auto& row = rows_[static_cast<size_t>(index.row())];
@@ -83,9 +137,9 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
     case TidRole:
       return QVariant::fromValue(row.tid);
     case MarkedRole:
-      return row.mark_color != LineMark_None;
+      return mark_color != static_cast<int>(LineMark_None);
     case MarkColorRole:
-      return QVariant::fromValue(static_cast<int>(row.mark_color));
+      return QVariant::fromValue(mark_color);
     case RawMessageRole:
       return row.raw_message;
     case MessageRole:
@@ -124,6 +178,11 @@ QString LogModel::plainTextAt(int row) const {
     return {};
   }
 
+  if (source_) {
+    const auto view = lineViewAt(row);
+    return view.has_value() ? fromView(view->plainText()) : QString{};
+  }
+
   const auto& log_row = rows_[static_cast<size_t>(row)];
   return log_row.message.isEmpty() ? log_row.raw_message : log_row.message;
 }
@@ -141,12 +200,22 @@ int LogModel::lineNoAt(int row) const {
     return 0;
   }
 
+  if (source_) {
+    const auto view = lineViewAt(row);
+    return view.has_value() ? static_cast<int>(view->line_number + 1U) : 0;
+  }
+
   return static_cast<int>(rows_[static_cast<size_t>(row)].line_no);
 }
 
 QString LogModel::functionNameAt(int row) const {
   if (row < 0 || row >= rowCount()) {
     return {};
+  }
+
+  if (source_) {
+    const auto view = lineViewAt(row);
+    return view.has_value() ? fromView(view->functionNameText()) : QString{};
   }
 
   return rows_[static_cast<size_t>(row)].function_name;
@@ -157,12 +226,22 @@ int LogModel::logLevelAt(int row) const {
     return static_cast<int>(LogLevel_Info);
   }
 
+  if (source_) {
+    const auto view = lineViewAt(row);
+    return view.has_value() ? static_cast<int>(view->log_level) : static_cast<int>(LogLevel_Info);
+  }
+
   return static_cast<int>(rows_[static_cast<size_t>(row)].log_level);
 }
 
 int LogModel::pidAt(int row) const {
   if (row < 0 || row >= rowCount()) {
     return 0;
+  }
+
+  if (source_) {
+    const auto view = lineViewAt(row);
+    return view.has_value() ? static_cast<int>(view->pid) : 0;
   }
 
   return static_cast<int>(rows_[static_cast<size_t>(row)].pid);
@@ -173,6 +252,11 @@ int LogModel::tidAt(int row) const {
     return 0;
   }
 
+  if (source_) {
+    const auto view = lineViewAt(row);
+    return view.has_value() ? static_cast<int>(view->tid) : 0;
+  }
+
   return static_cast<int>(rows_[static_cast<size_t>(row)].tid);
 }
 
@@ -181,11 +265,27 @@ bool LogModel::markedAt(int row) const {
     return false;
   }
 
+  if (const auto it = marked_rows_.find(row); it != marked_rows_.end()) {
+    return it->second != LineMark_None;
+  }
+
+  if (source_) {
+    return false;
+  }
+
   return rows_[static_cast<size_t>(row)].mark_color != LineMark_None;
 }
 
 int LogModel::markColorAt(int row) const {
   if (row < 0 || row >= rowCount()) {
+    return static_cast<int>(LineMark_None);
+  }
+
+  if (const auto it = marked_rows_.find(row); it != marked_rows_.end()) {
+    return static_cast<int>(it->second);
+  }
+
+  if (source_) {
     return static_cast<int>(LineMark_None);
   }
 
@@ -270,7 +370,6 @@ void LogModel::setCurrent(bool current) {
   if (current_ == current) {
     if (current_) {
       refreshSourceMetrics();
-      syncRowsFromSourceSnapshot();
     }
     return;
   }
@@ -283,7 +382,6 @@ void LogModel::setCurrent(bool current) {
 
   source_metrics_timer_.start();
   refreshSourceMetrics();
-  syncRowsFromSourceSnapshot();
 }
 
 LineMarkColor LogModel::normalizedMarkColor(int color) const noexcept {
@@ -297,12 +395,26 @@ bool LogModel::setMarkColorAt(int row, LineMarkColor color) {
     return false;
   }
 
-  auto& log_row = rows_[static_cast<size_t>(row)];
-  if (log_row.mark_color == color) {
-    return false;
-  }
+  if (!source_) {
+    auto& log_row = rows_[static_cast<size_t>(row)];
+    if (log_row.mark_color == color) {
+      return false;
+    }
 
-  log_row.mark_color = color;
+    log_row.mark_color = color;
+  } else {
+    const auto existing = marked_rows_.find(row);
+    const auto current_color = existing == marked_rows_.end() ? LineMark_None : existing->second;
+    if (current_color == color) {
+      return false;
+    }
+
+    if (color == LineMark_None) {
+      marked_rows_.erase(row);
+    } else {
+      marked_rows_[row] = color;
+    }
+  }
   const QModelIndex model_index = index(row, 0);
   emit dataChanged(model_index, model_index, {MarkedRole, MarkColorRole});
   return true;
@@ -326,6 +438,14 @@ bool LogModel::following() const noexcept {
 
 bool LogModel::active() const noexcept {
   return active_;
+}
+
+bool LogModel::catchingUp() const noexcept {
+  return catching_up_;
+}
+
+bool LogModel::live() const noexcept {
+  return state_ == READY && !catching_up_;
 }
 
 QString LogModel::scannerName() const {
@@ -355,6 +475,8 @@ qulonglong LogModel::fileSize() const noexcept {
 void LogModel::setRows(std::vector<LogRow> rows) {
   beginResetModel();
   rows_ = std::move(rows);
+  marked_rows_.clear();
+  row_count_cache_ = static_cast<int>(rows_.size());
   endResetModel();
   emit lineCountChanged();
 }
@@ -363,6 +485,7 @@ void LogModel::appendRow(LogRow row) {
   const auto insert_at = static_cast<int>(rows_.size());
   beginInsertRows({}, insert_at, insert_at);
   rows_.push_back(std::move(row));
+  row_count_cache_ = static_cast<int>(rows_.size());
   endInsertRows();
   emit lineCountChanged();
 }
@@ -372,6 +495,7 @@ void LogModel::markReady() {
 }
 
 void LogModel::markFailed() {
+  setCatchingUp(false);
   setState(FAILED);
 }
 
@@ -381,6 +505,8 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
     source_.reset();
   }
   source_ = std::move(source);
+  marked_rows_.clear();
+  reset_pending_ = false;
   if (!source_) {
     source_metrics_timer_.stop();
     if (lines_per_second_ != 0.0) {
@@ -397,12 +523,22 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
     return;
   }
 
-  following_ = source_->snapshot().following;
+  const auto initial_snapshot = source_->snapshot();
+  following_ = initial_snapshot.following;
+  row_count_cache_ = static_cast<int>(initial_snapshot.line_count);
+  beginCatchUp();
+  updateSourceStatus(initial_snapshot);
 
   source_->setCallbacks(SourceCallbacks{
       .on_state_changed =
           [this](SourceSnapshot snapshot) {
             emit scannerNameChanged();
+            if (reset_pending_ && snapshot.state == SourceState::Ready) {
+              reset_pending_ = false;
+              syncSourceRowCount(snapshot.line_count, false);
+            } else if (!reset_pending_ && row_count_cache_ > static_cast<int>(snapshot.line_count)) {
+              syncSourceRowCount(snapshot.line_count, true);
+            }
             if (current_
                 && !qFuzzyCompare(lines_per_second_ + 1.0, snapshot.lines_per_second + 1.0)) {
               lines_per_second_ = snapshot.lines_per_second;
@@ -412,21 +548,12 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
               file_size_ = snapshot.file_size;
               emit fileSizeChanged();
             }
-            if (snapshot.state == SourceState::Failed) {
-              markFailed();
-            }
-            if (snapshot.state == SourceState::Ready) {
-              if (current_ && reset_pending_) {
-                reset_pending_ = false;
-                appendRowsFromSource(0, snapshot.line_count);
-              }
-              markReady();
-            }
+            updateSourceStatus(snapshot);
           },
       .on_lines_appended =
           [this](uint64_t first_new_line, uint64_t count) {
-            if (current_) {
-              appendRowsFromSource(first_new_line, count);
+            if (!reset_pending_) {
+              syncSourceRowCount(first_new_line + count);
             }
             markActiveForRecentLines();
             if (current_) {
@@ -435,12 +562,14 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
           },
       .on_reset =
           [this](SourceResetReason) {
-            reset_pending_ = true;
             setActive(false);
-            if (current_) {
-              refreshSourceMetrics();
-              setRows({});
+            marked_rows_.clear();
+            reset_pending_ = true;
+            beginCatchUp();
+            if (row_count_cache_ != 0) {
+              syncSourceRowCount(0, true);
             }
+            refreshSourceMetrics();
           },
       .on_error =
           [this](std::string) {
@@ -448,6 +577,7 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
             if (current_) {
               refreshSourceMetrics();
             }
+            setCatchingUp(false);
             markFailed();
           },
   });
@@ -456,6 +586,7 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
     source_metrics_timer_.start();
   }
   refreshSourceMetrics();
+  emit lineCountChanged();
   emit followingChanged();
   emit scannerNameChanged();
 }
@@ -466,47 +597,11 @@ void LogModel::loadFromSource() {
     return;
   }
 
+  beginCatchUp();
   source_->startIndexing();
-  if (source_->snapshot().state == SourceState::Ready) {
-    replaceRowsFromSource();
-    markReady();
-  } else if (source_->snapshot().state == SourceState::Failed) {
-    markFailed();
-  }
-}
-
-void LogModel::replaceRowsFromSource() {
-  if (!source_) {
-    setRows({});
-    return;
-  }
-  if (!current_) {
-    return;
-  }
-
-  std::vector<LogRow> rows;
   const auto snapshot = source_->snapshot();
-  source_->fetchLines(0, static_cast<size_t>(snapshot.line_count),
-                      [&rows](SourceLines lines) {
-                        rows.reserve(lines.lines.size());
-                        for (const auto& line : lines.lines) {
-                          rows.push_back(makeRow(line));
-                        }
-                      });
-  setRows(std::move(rows));
-}
-
-void LogModel::appendRowsFromSource(uint64_t first_line, uint64_t count) {
-  if (!source_ || !current_ || count == 0) {
-    return;
-  }
-
-  source_->fetchLines(first_line, static_cast<size_t>(count),
-                      [this](SourceLines lines) {
-                        for (const auto& line : lines.lines) {
-                          appendRow(makeRow(line));
-                        }
-                      });
+  syncSourceRowCount(snapshot.line_count, true);
+  updateSourceStatus(snapshot);
 }
 
 void LogModel::markActiveForRecentLines() {
@@ -538,29 +633,87 @@ void LogModel::refreshSourceMetrics() {
   }
 }
 
-void LogModel::syncRowsFromSourceSnapshot() {
-  if (!source_ || !current_) {
+void LogModel::syncSourceRowCount(uint64_t next_row_count, bool force_reset) {
+  const int normalized = static_cast<int>(std::min<uint64_t>(
+      next_row_count, static_cast<uint64_t>(std::numeric_limits<int>::max())));
+  if (force_reset) {
+    beginResetModel();
+    row_count_cache_ = normalized;
+    endResetModel();
+    emit lineCountChanged();
     return;
   }
 
-  const auto snapshot = source_->snapshot();
+  if (row_count_cache_ == normalized) {
+    return;
+  }
+
+  if (normalized < row_count_cache_) {
+    beginResetModel();
+    row_count_cache_ = normalized;
+    endResetModel();
+  } else {
+    beginInsertRows({}, row_count_cache_, normalized - 1);
+    row_count_cache_ = normalized;
+    endInsertRows();
+  }
+  emit lineCountChanged();
+}
+
+std::optional<SourceLineView> LogModel::lineViewAt(int row) const {
+  if (!source_ || row < 0 || row >= rowCount()) {
+    return std::nullopt;
+  }
+
+  return source_->lineViewAt(static_cast<uint64_t>(row));
+}
+
+void LogModel::beginCatchUp() {
+  catch_up_started_at_ = std::chrono::steady_clock::now();
+  setCatchingUp(true);
+}
+
+void LogModel::logSourceReady(uint64_t line_count) {
+  if (!catch_up_started_at_.has_value()) {
+    return;
+  }
+
+  const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - *catch_up_started_at_).count();
+  catch_up_started_at_.reset();
+  LOG_INFO << "Source ready: '" << sourceLabel(source_url_).toStdString()
+           << "', lines=" << line_count
+           << ", catchUpMs=" << elapsed_ms;
+}
+
+void LogModel::updateSourceStatus(const SourceSnapshot& snapshot) {
+  const auto was_live = live();
+
+  setCatchingUp(snapshot.catching_up);
+
   if (snapshot.state == SourceState::Failed) {
     markFailed();
     return;
   }
 
-  const auto snapshot_line_count = static_cast<size_t>(snapshot.line_count);
-  if (reset_pending_ || snapshot_line_count < rows_.size()) {
-    reset_pending_ = false;
-    replaceRowsFromSource();
-  } else if (snapshot_line_count > rows_.size()) {
-    appendRowsFromSource(static_cast<uint64_t>(rows_.size()),
-                         static_cast<uint64_t>(snapshot_line_count - rows_.size()));
-  }
-
   if (snapshot.state == SourceState::Ready) {
     markReady();
+    if (!was_live && live()) {
+      logSourceReady(snapshot.line_count);
+    }
+    return;
   }
+
+  setState(INITIALIZING);
+}
+
+void LogModel::setCatchingUp(bool catching_up) {
+  if (catching_up_ == catching_up) {
+    return;
+  }
+
+  catching_up_ = catching_up;
+  emit sourceStatusChanged();
 }
 
 void LogModel::setState(State state) {
@@ -568,8 +721,12 @@ void LogModel::setState(State state) {
     return;
   }
 
+  const auto old_live = live();
   state_ = state;
   emit stateChanged();
+  if (old_live != live()) {
+    emit sourceStatusChanged();
+  }
 }
 
 }  // namespace lgx
