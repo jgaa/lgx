@@ -274,6 +274,16 @@ std::optional<SourceLineView> FileSource::lineViewAt(uint64_t line_number) {
   return buildLineView(static_cast<size_t>(line_number), page);
 }
 
+std::optional<SourceLineView> FileSource::rawLineViewAt(uint64_t line_number) {
+  if (line_number >= lines_.size()) {
+    return std::nullopt;
+  }
+
+  const auto page_index = static_cast<size_t>(lines_[static_cast<size_t>(line_number)].page_index);
+  const auto page = pageSnapshot(page_index);
+  return buildLineView(static_cast<size_t>(line_number), page);
+}
+
 void FileSource::visitLineViews(uint64_t first_line, size_t count,
                                 std::function<bool(const SourceLineView&)> visitor) {
   if (!visitor || count == 0 || first_line >= lines_.size()) {
@@ -290,6 +300,31 @@ void FileSource::visitLineViews(uint64_t first_line, size_t count,
     const auto page_index = static_cast<size_t>(lines_[line_index].page_index);
     if (page_index != current_page_index) {
       ensurePageDeepParsed(page_index);
+      current_page = pageSnapshot(page_index);
+      current_page_index = page_index;
+    }
+
+    if (!visitor(buildLineView(line_index, current_page))) {
+      break;
+    }
+  }
+}
+
+void FileSource::visitRawLineViews(uint64_t first_line, size_t count,
+                                   std::function<bool(const SourceLineView&)> visitor) {
+  if (!visitor || count == 0 || first_line >= lines_.size()) {
+    return;
+  }
+
+  const auto available = lines_.size() - static_cast<size_t>(first_line);
+  const auto actual_count = std::min(count, available);
+  size_t current_page_index = std::numeric_limits<size_t>::max();
+  PageDataPtr current_page;
+
+  for (size_t offset = 0; offset < actual_count; ++offset) {
+    const auto line_index = static_cast<size_t>(first_line) + offset;
+    const auto page_index = static_cast<size_t>(lines_[line_index].page_index);
+    if (page_index != current_page_index) {
       current_page = pageSnapshot(page_index);
       current_page_index = page_index;
     }

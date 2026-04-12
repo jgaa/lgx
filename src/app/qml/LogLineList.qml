@@ -240,6 +240,15 @@ Item {
         AppEngine.copyTextToClipboard(rowModel.plainTextAt(rowIndex))
     }
 
+    function popupTextForRow(rowIndex, fallbackText) {
+        if (!rowModel || rowIndex < 0 || rowIndex >= listView.count) {
+            return fallbackText ? fallbackText : ""
+        }
+
+        const rawText = rowModel.rawTextAt(rowIndex)
+        return rawText.length > 0 ? rawText : (fallbackText ? fallbackText : "")
+    }
+
     function openContextMenu(rowIndex, rowTextValue, menuPoint) {
         contextMenuLineIndex = rowIndex
         contextMenuLineText = rowTextValue
@@ -488,7 +497,9 @@ Item {
             onTriggered: {
                 const point = Qt.point(Math.round((root.width - linePopup.width) / 2),
                                        Math.round((root.height - linePopup.height) / 2))
-                root.openLinePopup(root.contextMenuLineIndex, root.contextMenuLineText, point)
+                root.openLinePopup(root.contextMenuLineIndex,
+                                   root.popupTextForRow(root.contextMenuLineIndex, root.contextMenuLineText),
+                                   point)
             }
         }
     }
@@ -839,9 +850,9 @@ Item {
                         }
 
                         root.finishPointerSelection()
-                        const plainText = root.rowModel ? root.rowModel.plainTextAt(index) : root.rowText(message, rawMessage)
+                        const rawText = root.popupTextForRow(index, rawMessage.length > 0 ? rawMessage : root.rowText(message, rawMessage))
                         const point = mapToItem(root, mouse.x + 12, mouse.y + 12)
-                        root.openLinePopup(index, plainText, point)
+                        root.openLinePopup(index, rawText, point)
                     }
 
                     onClicked: function(mouse) {

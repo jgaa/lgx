@@ -912,9 +912,18 @@ std::optional<SourceLineView> StreamSource::lineViewAt(uint64_t line_number) {
   return spool_source_.lineViewAt(line_number);
 }
 
+std::optional<SourceLineView> StreamSource::rawLineViewAt(uint64_t line_number) {
+  return spool_source_.rawLineViewAt(line_number);
+}
+
 void StreamSource::visitLineViews(uint64_t first_line, size_t count,
                                   std::function<bool(const SourceLineView&)> visitor) {
   spool_source_.visitLineViews(first_line, count, std::move(visitor));
+}
+
+void StreamSource::visitRawLineViews(uint64_t first_line, size_t count,
+                                     std::function<bool(const SourceLineView&)> visitor) {
+  spool_source_.visitRawLineViews(first_line, count, std::move(visitor));
 }
 
 std::optional<uint64_t> StreamSource::nextLineWithLevel(uint64_t after_line,

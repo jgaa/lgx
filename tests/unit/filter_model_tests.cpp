@@ -15,6 +15,7 @@ class CountingLogSource final : public LogSource {
     qint64 pid{};
     qint64 tid{};
     QString function_name;
+    QString raw_message;
     QString message;
   };
 
@@ -53,7 +54,7 @@ class CountingLogSource final : public LogSource {
             .log_level = entry.level,
             .pid = static_cast<uint32_t>(entry.pid),
             .tid = static_cast<uint32_t>(entry.tid),
-            .text = entry.message.toStdString(),
+            .text = entry.raw_message.toStdString(),
             .function_name = entry.function_name.toStdString(),
             .message = entry.message.toStdString(),
         });
@@ -97,9 +98,47 @@ class CountingLogSource final : public LogSource {
     return std::nullopt;
   }
 
+  [[nodiscard]] std::optional<SourceLineView> lineViewAt(uint64_t line_number) override {
+    ++line_view_calls;
+    if (line_number >= entries_.size()) {
+      return std::nullopt;
+    }
+
+    const auto& entry = entries_.at(static_cast<size_t>(line_number));
+    SourceLineView view;
+    view.line_number = line_number;
+    view.log_level = entry.level;
+    view.pid = static_cast<uint32_t>(entry.pid);
+    view.tid = static_cast<uint32_t>(entry.tid);
+    view.owned_raw_text = std::make_shared<std::string>(entry.raw_message.toStdString());
+    view.owned_message = std::make_shared<std::string>(entry.message.toStdString());
+    if (!entry.function_name.isEmpty()) {
+      view.owned_function_name = std::make_shared<std::string>(entry.function_name.toStdString());
+    }
+    return view;
+  }
+
+  [[nodiscard]] std::optional<SourceLineView> rawLineViewAt(uint64_t line_number) override {
+    ++raw_line_view_calls;
+    if (line_number >= entries_.size()) {
+      return std::nullopt;
+    }
+
+    const auto& entry = entries_.at(static_cast<size_t>(line_number));
+    SourceLineView view;
+    view.line_number = line_number;
+    view.log_level = entry.level;
+    view.pid = static_cast<uint32_t>(entry.pid);
+    view.tid = static_cast<uint32_t>(entry.tid);
+    view.owned_raw_text = std::make_shared<std::string>(entry.raw_message.toStdString());
+    return view;
+  }
+
   mutable int fetch_lines_calls{0};
   mutable int next_line_calls{0};
   mutable int previous_line_calls{0};
+  mutable int line_view_calls{0};
+  mutable int raw_line_view_calls{0};
 
  private:
   std::vector<Entry> entries_;
@@ -371,9 +410,9 @@ TEST(FilterModelTests, PureLevelFilteringUsesSourceLevelNavigationWithoutFetchin
   third.raw_message = QStringLiteral("third");
 
   auto source = std::make_unique<CountingLogSource>(std::vector<CountingLogSource::Entry>{
-      {.level = LogLevel_Info, .message = QStringLiteral("first")},
-      {.level = LogLevel_Warn, .message = QStringLiteral("second")},
-      {.level = LogLevel_Error, .message = QStringLiteral("third")},
+      {.level = LogLevel_Info, .raw_message = QStringLiteral("first"), .message = QStringLiteral("first")},
+      {.level = LogLevel_Warn, .raw_message = QStringLiteral("second"), .message = QStringLiteral("second")},
+      {.level = LogLevel_Error, .raw_message = QStringLiteral("third"), .message = QStringLiteral("third")},
   });
   auto* source_ptr = source.get();
   source_model.setRows({first, second, third});
@@ -413,8 +452,8 @@ TEST(FilterModelTests, MixedPidAndLevelFilteringDoesNotUseSourceLevelNavigationS
   second.raw_message = QStringLiteral("second");
 
   auto source = std::make_unique<CountingLogSource>(std::vector<CountingLogSource::Entry>{
-      {.level = LogLevel_Warn, .pid = 1111, .message = QStringLiteral("first")},
-      {.level = LogLevel_Warn, .pid = 2222, .message = QStringLiteral("second")},
+      {.level = LogLevel_Warn, .pid = 1111, .raw_message = QStringLiteral("first"), .message = QStringLiteral("first")},
+      {.level = LogLevel_Warn, .pid = 2222, .raw_message = QStringLiteral("second"), .message = QStringLiteral("second")},
   });
   auto* source_ptr = source.get();
   source_model.setRows({first, second});
@@ -481,28 +520,93 @@ TEST(FilterModelTests, RepeatedTextFilteringProducesStableResults) {
   EXPECT_EQ(filter_model.plainTextAt(2), QStringLiteral("gamma payload"));
 }
 
+TEST(FilterModelTests, RawTextSearchMatchesWholeLineWhileDefaultUsesMessageOnly) {
+  auto source = std::make_unique<CountingLogSource>(std::vector<CountingLogSource::Entry>{
+      {.level = LogLevel_Info,
+       .raw_message = QStringLiteral("2026-04-12 INFO worker: hidden payload"),
+       .message = QStringLiteral("hidden payload")},
+      {.level = LogLevel_Info,
+       .raw_message = QStringLiteral("2026-04-12 INFO helper: other"),
+       .message = QStringLiteral("other")},
+  });
+  auto* source_ptr = source.get();
+
+  LogModel source_model(QUrl(QStringLiteral("file:///tmp/raw-search.log")));
+  source_model.setSource(std::move(source));
+  source_model.loadFromSource();
+
+  FilterModel filter_model(&source_model);
+  filter_model.setPattern(QStringLiteral("worker"));
+  filter_model.refresh();
+
+  EXPECT_EQ(filter_model.rowCount(), 0);
+
+  filter_model.setRaw(true);
+  filter_model.refresh();
+
+  ASSERT_EQ(filter_model.rowCount(), 1);
+  EXPECT_EQ(filter_model.plainTextAt(0), QStringLiteral("hidden payload"));
+  EXPECT_GT(source_ptr->raw_line_view_calls, 0);
+}
+
+TEST(FilterModelTests, RawTextAndLevelFilteringUsesRawLineViewsWithoutDeepParsing) {
+  auto source = std::make_unique<CountingLogSource>(std::vector<CountingLogSource::Entry>{
+      {.level = LogLevel_Info,
+       .raw_message = QStringLiteral("INFO worker alpha"),
+       .message = QStringLiteral("alpha")},
+      {.level = LogLevel_Debug,
+       .raw_message = QStringLiteral("DEBUG worker beta"),
+       .message = QStringLiteral("beta")},
+      {.level = LogLevel_Warn,
+       .raw_message = QStringLiteral("WARN helper worker"),
+       .message = QStringLiteral("gamma")},
+  });
+  auto* source_ptr = source.get();
+
+  LogModel source_model(QUrl(QStringLiteral("file:///tmp/raw-level-search.log")));
+  source_model.setSource(std::move(source));
+  source_model.loadFromSource();
+
+  FilterModel filter_model(&source_model);
+  for (int level = static_cast<int>(LogLevel_Error); level <= static_cast<int>(LogLevel_Trace); ++level) {
+    filter_model.setLevelEnabled(level, false);
+  }
+  filter_model.setRaw(true);
+  filter_model.setPattern(QStringLiteral("worker"));
+  filter_model.setLevelEnabled(static_cast<int>(LogLevel_Warn), true);
+  filter_model.refresh();
+
+  ASSERT_EQ(filter_model.rowCount(), 1);
+  EXPECT_EQ(filter_model.sourceRowAt(0), 2);
+  EXPECT_EQ(source_ptr->line_view_calls, 0);
+  EXPECT_GT(source_ptr->raw_line_view_calls, 0);
+}
+
 TEST(FilterModelTests, LogModelExposesSourceBackedRowCountWithoutFetchingRows) {
   LogModel source_model(QUrl(QStringLiteral("file:///tmp/filter.log")));
 
   auto source = std::make_unique<CountingLogSource>(std::vector<CountingLogSource::Entry>{
-      {.level = LogLevel_Info, .message = QStringLiteral("first")},
-      {.level = LogLevel_Warn, .message = QStringLiteral("second")},
+      {.level = LogLevel_Info, .raw_message = QStringLiteral("first"), .message = QStringLiteral("first")},
+      {.level = LogLevel_Warn, .raw_message = QStringLiteral("second"), .message = QStringLiteral("second")},
   });
   auto* source_ptr = source.get();
   source_model.setSource(std::move(source));
   source_model.loadFromSource();
 
   EXPECT_EQ(source_ptr->fetch_lines_calls, 0);
+  EXPECT_EQ(source_ptr->line_view_calls, 0);
   EXPECT_EQ(source_model.rowCount(), 2);
 
   const auto index = source_model.index(0, 0);
   ASSERT_TRUE(index.isValid());
   EXPECT_EQ(source_model.data(index, LogModel::MessageRole).toString(), QStringLiteral("first"));
-  EXPECT_EQ(source_ptr->fetch_lines_calls, 1);
+  EXPECT_EQ(source_ptr->fetch_lines_calls, 0);
+  EXPECT_EQ(source_ptr->line_view_calls, 1);
 
   source_model.setCurrent(true);
   EXPECT_EQ(source_model.plainTextAt(1), QStringLiteral("second"));
-  EXPECT_EQ(source_ptr->fetch_lines_calls, 2);
+  EXPECT_EQ(source_ptr->fetch_lines_calls, 0);
+  EXPECT_EQ(source_ptr->line_view_calls, 2);
 }
 
 }  // namespace

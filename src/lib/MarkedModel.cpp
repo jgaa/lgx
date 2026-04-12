@@ -82,6 +82,15 @@ QString MarkedModel::plainTextAt(int row) const {
   return source_row >= 0 ? source_model_->plainTextAt(source_row) : QString{};
 }
 
+QString MarkedModel::rawTextAt(int row) const {
+  if (!source_model_) {
+    return {};
+  }
+
+  const int source_row = sourceRowAt(row);
+  return source_row >= 0 ? source_model_->rawTextAt(source_row) : QString{};
+}
+
 int MarkedModel::sourceRowAt(int row) const {
   if (row < 0 || row >= rowCount()) {
     return -1;

@@ -17,6 +17,7 @@ class FilterModel final : public QAbstractListModel {
   Q_PROPERTY(QObject* sourceModel READ sourceModelObject CONSTANT)
   Q_PROPERTY(QUrl sourceUrl READ sourceUrl CONSTANT)
   Q_PROPERTY(QString pattern READ pattern WRITE setPattern NOTIFY patternChanged)
+  Q_PROPERTY(bool raw READ raw WRITE setRaw NOTIFY rawChanged)
   Q_PROPERTY(bool regex READ regex WRITE setRegex NOTIFY regexChanged)
   Q_PROPERTY(bool caseInsensitive READ caseInsensitive WRITE setCaseInsensitive NOTIFY caseInsensitiveChanged)
   Q_PROPERTY(bool autoRefresh READ autoRefresh WRITE setAutoRefresh NOTIFY autoRefreshChanged)
@@ -55,6 +56,7 @@ class FilterModel final : public QAbstractListModel {
   [[nodiscard]] QUrl sourceUrl() const;
   [[nodiscard]] QString pattern() const;
   [[nodiscard]] bool regex() const noexcept;
+  [[nodiscard]] bool raw() const noexcept;
   [[nodiscard]] bool caseInsensitive() const noexcept;
   [[nodiscard]] bool autoRefresh() const noexcept;
   [[nodiscard]] bool dirty() const noexcept;
@@ -64,6 +66,7 @@ class FilterModel final : public QAbstractListModel {
   [[nodiscard]] QString selectedProcessName() const;
 
   Q_INVOKABLE QString plainTextAt(int row) const;
+  Q_INVOKABLE QString rawTextAt(int row) const;
   Q_INVOKABLE int sourceRowAt(int row) const;
   Q_INVOKABLE int proxyRowAtOrAfterSourceRow(int source_row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
@@ -82,6 +85,7 @@ class FilterModel final : public QAbstractListModel {
 
  public slots:
   void setPattern(const QString& pattern);
+  void setRaw(bool enabled);
   void setRegex(bool enabled);
   void setCaseInsensitive(bool enabled);
   void setAutoRefresh(bool enabled);
@@ -90,6 +94,7 @@ class FilterModel final : public QAbstractListModel {
 
  signals:
   void patternChanged();
+  void rawChanged();
   void regexChanged();
   void caseInsensitiveChanged();
   void autoRefreshChanged();
@@ -117,6 +122,7 @@ class FilterModel final : public QAbstractListModel {
   QString regex_error_;
   std::array<bool, number_of_log_levels> enabled_levels_{};
   QTimer refresh_timer_;
+  bool raw_{false};
   bool regex_{false};
   bool case_insensitive_{false};
   bool auto_refresh_{true};

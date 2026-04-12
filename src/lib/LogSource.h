@@ -177,8 +177,11 @@ class LogSource {
   virtual void fetchLines(uint64_t first_line, size_t count,
                           std::function<void(SourceLines)> on_ready);
   [[nodiscard]] virtual std::optional<SourceLineView> lineViewAt(uint64_t line_number);
+  [[nodiscard]] virtual std::optional<SourceLineView> rawLineViewAt(uint64_t line_number);
   virtual void visitLineViews(uint64_t first_line, size_t count,
                               std::function<bool(const SourceLineView&)> visitor);
+  virtual void visitRawLineViews(uint64_t first_line, size_t count,
+                                 std::function<bool(const SourceLineView&)> visitor);
   [[nodiscard]] virtual std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
                                                                   LogLevel level) const;
   [[nodiscard]] virtual std::optional<uint64_t> previousLineWithLevel(

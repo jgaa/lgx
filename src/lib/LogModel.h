@@ -74,6 +74,7 @@ class LogModel final : public QAbstractListModel {
   [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
   [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
   Q_INVOKABLE QString plainTextAt(int row) const;
+  Q_INVOKABLE QString rawTextAt(int row) const;
   Q_INVOKABLE int sourceRowAt(int row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
   Q_INVOKABLE QString functionNameAt(int row) const;

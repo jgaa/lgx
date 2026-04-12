@@ -312,8 +312,22 @@ Item {
                 }
 
                 CheckBox {
+                    text: qsTr("raw")
+                    checked: !!root.filterModel && root.filterModel.raw
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Search the full raw log line instead of only the parsed message")
+                    onToggled: {
+                        if (root.filterModel) {
+                            root.filterModel.raw = checked
+                        }
+                    }
+                }
+
+                CheckBox {
                     text: qsTr("regex")
                     checked: !!root.filterModel && root.filterModel.regex
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Interpret the filter text as a regular expression")
                     onToggled: {
                         if (root.filterModel) {
                             root.filterModel.regex = checked
@@ -324,6 +338,8 @@ Item {
                 CheckBox {
                     text: qsTr("icase")
                     checked: !!root.filterModel && root.filterModel.caseInsensitive
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Match text without case sensitivity")
                     onToggled: {
                         if (root.filterModel) {
                             root.filterModel.caseInsensitive = checked
@@ -334,6 +350,8 @@ Item {
                 CheckBox {
                     text: qsTr("auto-refresh")
                     checked: !!root.filterModel && root.filterModel.autoRefresh
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Rebuild the filter automatically when the criteria or source rows change")
                     onToggled: {
                         if (root.filterModel) {
                             root.filterModel.autoRefresh = checked
@@ -420,7 +438,7 @@ Item {
 
     MouseArea {
         id: viewHoverArea
-        anchors.fill: parent
+        anchors.fill: lineList
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         z: 1

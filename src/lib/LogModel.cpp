@@ -187,6 +187,19 @@ QString LogModel::plainTextAt(int row) const {
   return log_row.message.isEmpty() ? log_row.raw_message : log_row.message;
 }
 
+QString LogModel::rawTextAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return {};
+  }
+
+  if (source_) {
+    const auto view = lineViewAt(row);
+    return view.has_value() ? fromView(view->rawText()) : QString{};
+  }
+
+  return rows_[static_cast<size_t>(row)].raw_message;
+}
+
 int LogModel::sourceRowAt(int row) const {
   if (row < 0 || row >= rowCount()) {
     return -1;

@@ -41,6 +41,7 @@ class MarkedModel final : public QAbstractListModel {
   [[nodiscard]] QUrl sourceUrl() const;
 
   Q_INVOKABLE QString plainTextAt(int row) const;
+  Q_INVOKABLE QString rawTextAt(int row) const;
   Q_INVOKABLE int sourceRowAt(int row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
   Q_INVOKABLE int logLevelAt(int row) const;

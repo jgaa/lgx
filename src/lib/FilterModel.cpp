@@ -15,6 +15,10 @@ bool containsText(std::string_view haystack, std::string_view needle) {
   return needle.empty() || haystack.find(needle) != std::string_view::npos;
 }
 
+std::string_view searchTextFor(const SourceLineView& view, bool raw) noexcept {
+  return raw ? view.rawText() : view.plainText();
+}
+
 }
 
 FilterModel::FilterModel(LogModel* source_model, QObject* parent)
@@ -105,6 +109,10 @@ bool FilterModel::regex() const noexcept {
   return regex_;
 }
 
+bool FilterModel::raw() const noexcept {
+  return raw_;
+}
+
 bool FilterModel::caseInsensitive() const noexcept {
   return case_insensitive_;
 }
@@ -140,6 +148,15 @@ QString FilterModel::plainTextAt(int row) const {
 
   const int source_row = sourceRowAt(row);
   return source_row >= 0 ? source_model_->plainTextAt(source_row) : QString{};
+}
+
+QString FilterModel::rawTextAt(int row) const {
+  if (!source_model_) {
+    return {};
+  }
+
+  const int source_row = sourceRowAt(row);
+  return source_row >= 0 ? source_model_->rawTextAt(source_row) : QString{};
 }
 
 int FilterModel::sourceRowAt(int row) const {
@@ -333,6 +350,20 @@ void FilterModel::setPattern(const QString& pattern) {
   }
 }
 
+void FilterModel::setRaw(bool enabled) {
+  if (raw_ == enabled) {
+    return;
+  }
+
+  raw_ = enabled;
+  emit rawChanged();
+  if (auto_refresh_) {
+    scheduleRefresh();
+  } else {
+    markDirty();
+  }
+}
+
 void FilterModel::setRegex(bool enabled) {
   if (regex_ == enabled) {
     return;
@@ -419,13 +450,17 @@ bool FilterModel::matchesSourceRow(int source_row) const {
   }
 
   const bool has_text_filter = !pattern_.isEmpty();
+  const bool can_use_raw_fast_path = raw_ && has_text_filter && selected_pid_ == 0
+      && selected_process_name_.isEmpty();
   if (!any_level_enabled && !has_text_filter && selected_pid_ == 0
       && selected_process_name_.isEmpty()) {
     return true;
   }
 
   if (auto* source = source_model_->source()) {
-    const auto view = source->lineViewAt(static_cast<uint64_t>(source_row));
+    const auto view = can_use_raw_fast_path
+        ? source->rawLineViewAt(static_cast<uint64_t>(source_row))
+        : source->lineViewAt(static_cast<uint64_t>(source_row));
     if (!view.has_value()) {
       return false;
     }
@@ -455,12 +490,13 @@ bool FilterModel::matchesSourceRow(int source_row) const {
 
     if (!regex_ && !case_insensitive_) {
       const auto needle = pattern_.toUtf8();
-      return containsText(view->plainText(),
+      return containsText(searchTextFor(*view, raw_),
                           std::string_view(needle.constData(), static_cast<size_t>(needle.size())));
     }
 
-    const QString text = QString::fromUtf8(view->plainText().data(),
-                                           static_cast<qsizetype>(view->plainText().size()));
+    const auto text_view = searchTextFor(*view, raw_);
+    const QString text = QString::fromUtf8(text_view.data(),
+                                           static_cast<qsizetype>(text_view.size()));
     if (!regex_) {
       return text.contains(pattern_, case_insensitive_ ? Qt::CaseInsensitive : Qt::CaseSensitive);
     }
@@ -494,7 +530,9 @@ bool FilterModel::matchesSourceRow(int source_row) const {
     return true;
   }
 
-  const QString text = source_model_->plainTextAt(source_row);
+  const QString text = raw_
+      ? source_model_->data(source_model_->index(source_row, 0), LogModel::RawMessageRole).toString()
+      : source_model_->plainTextAt(source_row);
   if (!regex_) {
     return text.contains(pattern_, case_insensitive_ ? Qt::CaseInsensitive : Qt::CaseSensitive);
   }

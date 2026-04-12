@@ -180,6 +180,10 @@ std::optional<SourceLineView> LogSource::lineViewAt(uint64_t line_number) {
   return result;
 }
 
+std::optional<SourceLineView> LogSource::rawLineViewAt(uint64_t line_number) {
+  return lineViewAt(line_number);
+}
+
 void LogSource::visitLineViews(uint64_t first_line, size_t count,
                                std::function<bool(const SourceLineView&)> visitor) {
   if (!visitor || count == 0) {
@@ -188,6 +192,23 @@ void LogSource::visitLineViews(uint64_t first_line, size_t count,
 
   for (size_t index = 0; index < count; ++index) {
     const auto view = lineViewAt(first_line + index);
+    if (!view.has_value()) {
+      continue;
+    }
+    if (!visitor(*view)) {
+      break;
+    }
+  }
+}
+
+void LogSource::visitRawLineViews(uint64_t first_line, size_t count,
+                                  std::function<bool(const SourceLineView&)> visitor) {
+  if (!visitor || count == 0) {
+    return;
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    const auto view = rawLineViewAt(first_line + index);
     if (!view.has_value()) {
       continue;
     }
