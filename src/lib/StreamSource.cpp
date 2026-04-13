@@ -903,27 +903,17 @@ double StreamSource::linesPerSecond() const {
   return spool_source_.linesPerSecond();
 }
 
-void StreamSource::fetchLines(uint64_t first_line, size_t count,
-                              std::function<void(SourceLines)> on_ready) {
-  spool_source_.fetchLines(first_line, count, std::move(on_ready));
+std::vector<uint32_t> StreamSource::logcatPids() const {
+  return spool_source_.logcatPids();
 }
 
-std::optional<SourceLineView> StreamSource::lineViewAt(uint64_t line_number) {
-  return spool_source_.lineViewAt(line_number);
+std::vector<std::string> StreamSource::systemdProcessNames() const {
+  return spool_source_.systemdProcessNames();
 }
 
-std::optional<SourceLineView> StreamSource::rawLineViewAt(uint64_t line_number) {
-  return spool_source_.rawLineViewAt(line_number);
-}
-
-void StreamSource::visitLineViews(uint64_t first_line, size_t count,
-                                  std::function<bool(const SourceLineView&)> visitor) {
-  spool_source_.visitLineViews(first_line, count, std::move(visitor));
-}
-
-void StreamSource::visitRawLineViews(uint64_t first_line, size_t count,
-                                     std::function<bool(const SourceLineView&)> visitor) {
-  spool_source_.visitRawLineViews(first_line, count, std::move(visitor));
+std::shared_ptr<const SourceWindow> StreamSource::windowForSourceRange(uint64_t first_line,
+                                                                       size_t count, bool raw) {
+  return spool_source_.windowForSourceRange(first_line, count, raw);
 }
 
 std::optional<uint64_t> StreamSource::nextLineWithLevel(uint64_t after_line,

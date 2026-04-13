@@ -31,6 +31,7 @@ class FilterModel final : public QAbstractListModel {
   enum Role {
     SourceRowRole = Qt::UserRole + 1,
     LineNoRole,
+    ProcessNameRole,
     FunctionNameRole,
     LogLevelRole,
     MarkedRole,
@@ -70,6 +71,7 @@ class FilterModel final : public QAbstractListModel {
   Q_INVOKABLE int sourceRowAt(int row) const;
   Q_INVOKABLE int proxyRowAtOrAfterSourceRow(int source_row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
+  Q_INVOKABLE QString processNameAt(int row) const;
   Q_INVOKABLE int logLevelAt(int row) const;
   Q_INVOKABLE int pidAt(int row) const;
   Q_INVOKABLE int tidAt(int row) const;
@@ -106,8 +108,19 @@ class FilterModel final : public QAbstractListModel {
   void selectedProcessNameChanged();
 
  private:
+  struct SparseWindowCache {
+    int logical_first{-1};
+    int logical_last{-1};
+    std::shared_ptr<const SourceWindow> source_window;
+    QVector<int> source_rows;
+    bool raw{false};
+  };
+
   [[nodiscard]] bool matchesSourceRow(int source_row) const;
   [[nodiscard]] int proxyRowForSourceRow(int source_row) const;
+  [[nodiscard]] const SourceWindowLine* lineAtRow(int row, bool raw,
+                                                  const SourceWindow** window) const;
+  void clearCachedWindows() const;
   void scheduleRefresh();
   void markDirty();
   void rebuildFilter();
@@ -129,6 +142,8 @@ class FilterModel final : public QAbstractListModel {
   bool dirty_{false};
   int selected_pid_{0};
   QString selected_process_name_;
+  mutable SparseWindowCache parsed_window_;
+  mutable SparseWindowCache raw_window_;
 };
 
 }  // namespace lgx

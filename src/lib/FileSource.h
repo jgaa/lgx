@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <boost/unordered/unordered_flat_set.hpp>
 #include <qcorotask.h>
 
 #include "FileMonitor.h"
@@ -37,14 +38,10 @@ class FileSource final : public LogSource {
   void setRequestedScannerName(std::string name) override;
   [[nodiscard]] SourceSnapshot snapshot() const override;
   [[nodiscard]] uint64_t fileSize() const override;
-  void fetchLines(uint64_t first_line, size_t count,
-                  std::function<void(SourceLines)> on_ready) override;
-  [[nodiscard]] std::optional<SourceLineView> lineViewAt(uint64_t line_number) override;
-  [[nodiscard]] std::optional<SourceLineView> rawLineViewAt(uint64_t line_number) override;
-  void visitLineViews(uint64_t first_line, size_t count,
-                      std::function<bool(const SourceLineView&)> visitor) override;
-  void visitRawLineViews(uint64_t first_line, size_t count,
-                         std::function<bool(const SourceLineView&)> visitor) override;
+  [[nodiscard]] std::vector<uint32_t> logcatPids() const override;
+  [[nodiscard]] std::vector<std::string> systemdProcessNames() const override;
+  [[nodiscard]] std::shared_ptr<const SourceWindow> windowForSourceRange(
+      uint64_t first_line, size_t count, bool raw) override;
   [[nodiscard]] std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
                                                           LogLevel level) const override;
   [[nodiscard]] std::optional<uint64_t> previousLineWithLevel(uint64_t before_line,
@@ -65,19 +62,9 @@ class FileSource final : public LogSource {
     FileIdentity identity{};
   };
 
-  struct LineIndexEntry {
-    uint64_t file_offset{};
-    uint32_t length{};
-    uint32_t page_index{};
-    uint32_t line_index_in_page{};
-    LogLevel log_level{LogLevel_Info};
-    uint32_t pid{};
-    uint32_t tid{};
-    int64_t timestamp_msecs_since_epoch{-1};
-    TextSpan function_name;
-    TextSpan message;
-    TextSpan thread_id;
-    bool deep_parsed{false};
+  struct LineAnchor {
+    size_t first_line{};
+    size_t page_index{};
   };
 
   [[nodiscard]] static FileInfo statPath(const std::string& path);
@@ -86,8 +73,11 @@ class FileSource final : public LogSource {
   void rebuildIndex();
   void invalidateAllPages();
   void resetAndReindex(SourceResetReason reason);
+  void finalizeIndexedPage(size_t page_index);
+  void updateLineAnchorForPage(size_t page_index);
   size_t scanAppendedBytes(uint64_t start_offset);
   void clearIndexedState();
+  void updateProcessCatalog(std::string_view logical_line);
   void appendIndexedLine(uint64_t file_offset, uint32_t logical_length, size_t stored_bytes,
                          FastScanResult scan);
   void extendLastIndexedLine(size_t stored_bytes);
@@ -96,14 +86,13 @@ class FileSource final : public LogSource {
   void handleWatchHint(FileEventHint hint);
   [[nodiscard]] PageDataPtr pageSnapshot(size_t page_index) const;
   void ensurePageDeepParsed(size_t page_index);
-  [[nodiscard]] SourceLineView buildLineView(size_t line_index, const PageDataPtr& page) const;
   [[nodiscard]] QCoro::Task<PageDataPtr> loadPageSnapshot(size_t page_index) const;
   [[nodiscard]] PageDataPtr readPageSnapshot(size_t page_index) const;
-  [[nodiscard]] SourceLines collectLines(uint64_t first_line, size_t count) const;
   [[nodiscard]] std::optional<size_t> pageIndexForLine(size_t line_index) const;
 
   static constexpr size_t kReadBufferSize = 256 * 1024;
   static constexpr size_t kTargetPageBytes = 64 * 1024;
+  static constexpr size_t kLineAnchorStride = 10'000;
 
   std::filesystem::path path_;
   SourceState state_{SourceState::Idle};
@@ -113,7 +102,7 @@ class FileSource final : public LogSource {
   uint64_t file_size_{0};
   bool has_identity_{false};
   FileIdentity file_identity_{};
-  std::vector<LineIndexEntry> lines_;
+  std::vector<LineAnchor> line_anchors_;
   std::string pending_line_bytes_;
   std::optional<uint64_t> pending_line_offset_;
   std::shared_ptr<IFileMonitor> file_monitor_;
@@ -121,6 +110,9 @@ class FileSource final : public LogSource {
   std::unique_ptr<IFileWatch> directory_watch_;
   std::unique_ptr<LogFormatScanner> scanner_;
   std::string requested_scanner_name_{"Auto"};
+  boost::unordered_flat_set<uint32_t> logcat_pids_;
+  boost::unordered_flat_set<std::string> systemd_process_names_;
+  std::string previous_systemd_process_name_;
   bool open_{false};
 };
 

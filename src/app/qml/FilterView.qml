@@ -14,7 +14,6 @@ Item {
     property var claimedFilterModel: null
     property var processOptions: [{ pid: 0, name: "", label: qsTr("All processes") }]
     property bool pendingScrollRestore: false
-    property bool pendingTailAfterRefresh: false
     property int pendingTopSourceRow: -1
     readonly property bool hasSelection: lineList.hasSelection
     readonly property string selectedText: lineList.selectedText
@@ -151,14 +150,12 @@ Item {
     function rememberScrollPositionBeforeRefresh() {
         if (!filterModel || lineList.lineCount <= 0) {
             pendingScrollRestore = false
-            pendingTailAfterRefresh = false
             pendingTopSourceRow = -1
             return
         }
 
-        pendingTailAfterRefresh = lineList.isEffectivelyAtEnd()
         pendingTopSourceRow = filterModel.sourceRowAt(lineList.topVisibleIndex)
-        pendingScrollRestore = pendingTailAfterRefresh || pendingTopSourceRow >= 0
+        pendingScrollRestore = pendingTopSourceRow >= 0
     }
 
     function restoreScrollPositionAfterRefresh() {
@@ -169,20 +166,11 @@ Item {
         pendingScrollRestore = false
 
         if (lineList.lineCount <= 0) {
-            pendingTailAfterRefresh = false
             pendingTopSourceRow = -1
-            return
-        }
-
-        if (pendingTailAfterRefresh) {
-            pendingTailAfterRefresh = false
-            pendingTopSourceRow = -1
-            lineList.scrollToLast()
             return
         }
 
         const targetSourceRow = pendingTopSourceRow
-        pendingTailAfterRefresh = false
         pendingTopSourceRow = -1
         if (!filterModel || targetSourceRow < 0) {
             return
@@ -438,7 +426,7 @@ Item {
 
     MouseArea {
         id: viewHoverArea
-        anchors.fill: lineList
+        anchors.fill: parent
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         z: 1

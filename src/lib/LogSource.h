@@ -38,20 +38,8 @@ enum class SourceResetReason {
   Disappeared
 };
 
-struct SourceLine {
-  uint64_t line_number{};
-  LogLevel log_level{LogLevel_Info};
-  uint32_t pid{};
-  uint32_t tid{};
-  std::string text;
-  std::string function_name;
-  std::string message;
-  std::string thread_id;
-  std::optional<std::chrono::system_clock::time_point> timestamp;
-};
-
-struct SourceLineView {
-  uint64_t line_number{};
+struct SourceWindowLine {
+  uint64_t source_row{};
   LogLevel log_level{LogLevel_Info};
   uint32_t pid{};
   uint32_t tid{};
@@ -59,26 +47,31 @@ struct SourceLineView {
   TextSpan message;
   TextSpan thread_id;
   int64_t timestamp_msecs_since_epoch{-1};
-  std::shared_ptr<const PageData> page;
+  uint32_t page_slot{};
   uint32_t line_index_in_page{};
-  std::shared_ptr<std::string> owned_raw_text;
-  std::shared_ptr<std::string> owned_function_name;
-  std::shared_ptr<std::string> owned_message;
-  std::shared_ptr<std::string> owned_thread_id;
 
-  [[nodiscard]] std::string_view rawText() const noexcept;
-  [[nodiscard]] std::string_view functionNameText() const noexcept;
-  [[nodiscard]] std::string_view messageText() const noexcept;
-  [[nodiscard]] std::string_view plainText() const noexcept;
-  [[nodiscard]] std::string_view threadIdText() const noexcept;
   [[nodiscard]] bool hasTimestamp() const noexcept {
     return timestamp_msecs_since_epoch >= 0;
   }
 };
 
-struct SourceLines {
-  uint64_t first_line{};
-  std::vector<SourceLine> lines;
+class SourceWindow {
+ public:
+  [[nodiscard]] uint64_t firstSourceRow() const noexcept { return first_source_row_; }
+  [[nodiscard]] uint64_t lastSourceRow() const noexcept { return last_source_row_; }
+  [[nodiscard]] size_t lineCount() const noexcept { return lines_.size(); }
+  [[nodiscard]] bool containsSourceRow(uint64_t source_row) const noexcept;
+  [[nodiscard]] const SourceWindowLine* lineForSourceRow(uint64_t source_row) const noexcept;
+  [[nodiscard]] std::string_view rawText(const SourceWindowLine& line) const noexcept;
+  [[nodiscard]] std::string_view functionNameText(const SourceWindowLine& line) const noexcept;
+  [[nodiscard]] std::string_view messageText(const SourceWindowLine& line) const noexcept;
+  [[nodiscard]] std::string_view plainText(const SourceWindowLine& line) const noexcept;
+  [[nodiscard]] std::string_view threadIdText(const SourceWindowLine& line) const noexcept;
+
+  uint64_t first_source_row_{};
+  uint64_t last_source_row_{};
+  std::vector<PageDataPtr> pages_;
+  std::vector<SourceWindowLine> lines_;
 };
 
 struct SourceSnapshot {
@@ -115,6 +108,19 @@ class LogSource {
    */
   class PageMeta {
    public:
+    struct IndexedLine {
+      uint64_t file_offset{};
+      uint32_t length{};
+      LogLevel log_level{LogLevel_Info};
+      uint32_t pid{};
+      uint32_t tid{};
+      int64_t timestamp_msecs_since_epoch{-1};
+      TextSpan function_name;
+      TextSpan message;
+      TextSpan thread_id;
+      bool deep_parsed{false};
+    };
+
     struct LineIndex {
       std::vector<ParsedLineMetadata> lines;
     };
@@ -140,6 +146,13 @@ class LogSource {
       ts_start_ = ts;
     }
     void setLevelLines(LogLevel level, size_t lines) noexcept;
+    void startBuildingIndexedLines();
+    void appendIndexedLine(IndexedLine line);
+    void extendLastIndexedLine(size_t stored_bytes);
+    void finalizeIndexedLines();
+    [[nodiscard]] bool isBuildingIndexedLines() const noexcept;
+    [[nodiscard]] const IndexedLine& indexedLine(size_t index) const;
+    [[nodiscard]] IndexedLine& indexedLine(size_t index);
     void clearLineIndex() noexcept;
     [[nodiscard]] const LineIndex& ensureLineIndex(
         std::function<std::unique_ptr<LineIndex>()> factory) const;
@@ -154,6 +167,8 @@ class LogSource {
     std::chrono::system_clock::time_point ts_start_{};
     mutable std::mutex line_index_mutex_;
     mutable std::unique_ptr<LineIndex> line_index_;
+    std::deque<IndexedLine> building_indexed_lines_;
+    std::vector<IndexedLine> indexed_lines_;
   };
 
   LogSource() = default;
@@ -174,14 +189,10 @@ class LogSource {
   [[nodiscard]] virtual SourceSnapshot snapshot() const;
   [[nodiscard]] virtual uint64_t fileSize() const;
   [[nodiscard]] virtual double linesPerSecond() const;
-  virtual void fetchLines(uint64_t first_line, size_t count,
-                          std::function<void(SourceLines)> on_ready);
-  [[nodiscard]] virtual std::optional<SourceLineView> lineViewAt(uint64_t line_number);
-  [[nodiscard]] virtual std::optional<SourceLineView> rawLineViewAt(uint64_t line_number);
-  virtual void visitLineViews(uint64_t first_line, size_t count,
-                              std::function<bool(const SourceLineView&)> visitor);
-  virtual void visitRawLineViews(uint64_t first_line, size_t count,
-                                 std::function<bool(const SourceLineView&)> visitor);
+  [[nodiscard]] virtual std::vector<uint32_t> logcatPids() const;
+  [[nodiscard]] virtual std::vector<std::string> systemdProcessNames() const;
+  [[nodiscard]] virtual std::shared_ptr<const SourceWindow> windowForSourceRange(
+      uint64_t first_line, size_t count, bool raw);
   [[nodiscard]] virtual std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
                                                                   LogLevel level) const;
   [[nodiscard]] virtual std::optional<uint64_t> previousLineWithLevel(

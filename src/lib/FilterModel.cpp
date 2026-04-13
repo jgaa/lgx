@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 
+#include <QDateTime>
 #include <QSet>
 #include <QVariantMap>
 
@@ -15,8 +16,26 @@ bool containsText(std::string_view haystack, std::string_view needle) {
   return needle.empty() || haystack.find(needle) != std::string_view::npos;
 }
 
-std::string_view searchTextFor(const SourceLineView& view, bool raw) noexcept {
-  return raw ? view.rawText() : view.plainText();
+std::string_view searchTextFor(const SourceWindow& window, const SourceWindowLine& line,
+                               bool raw) noexcept {
+  return raw ? window.rawText(line) : window.plainText(line);
+}
+
+QString fromView(std::string_view value) {
+  return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
+}
+
+QString messageTextFromWindow(const SourceWindow& window, const SourceWindowLine& line) {
+  const auto message = fromView(window.messageText(line));
+  return message.isEmpty() ? fromView(window.rawText(line)) : message;
+}
+
+QString processNameFromWindow(const SourceWindow& window, const SourceWindowLine& line,
+                              const QString& scanner_name) {
+  if (scanner_name == QStringLiteral("Systemd")) {
+    return fromView(window.functionNameText(line)).trimmed();
+  }
+  return {};
 }
 
 }
@@ -70,6 +89,50 @@ QVariant FilterModel::data(const QModelIndex& index, int role) const {
     return {};
   }
 
+  if (source_model_->source()) {
+    const int source_row = filtered_rows_.at(index.row());
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(index.row(), false, &window);
+    if (!line || !window) {
+      return {};
+    }
+
+    switch (role) {
+      case SourceRowRole:
+        return source_row;
+      case LineNoRole:
+        return QVariant::fromValue(static_cast<qsizetype>(source_row + 1));
+      case ProcessNameRole:
+        return processNameFromWindow(*window, *line, scannerName());
+      case FunctionNameRole:
+        return fromView(window->functionNameText(*line));
+      case LogLevelRole:
+        return QVariant::fromValue(static_cast<int>(line->log_level));
+      case MarkedRole:
+        return source_model_->markedAt(source_row);
+      case MarkColorRole:
+        return source_model_->markColorAt(source_row);
+      case RawMessageRole:
+        return rawTextAt(index.row());
+      case MessageRole:
+        return messageTextFromWindow(*window, *line);
+      case DateRole:
+        return line->hasTimestamp()
+            ? QVariant::fromValue(QDateTime::fromMSecsSinceEpoch(line->timestamp_msecs_since_epoch))
+            : QVariant::fromValue(QDateTime{});
+      case TagsRole:
+        return QStringList{};
+      case ThreadIdRole:
+        return fromView(window->threadIdText(*line));
+      case PidRole:
+        return QVariant::fromValue(static_cast<qint64>(line->pid));
+      case TidRole:
+        return QVariant::fromValue(static_cast<qint64>(line->tid));
+      default:
+        return {};
+    }
+  }
+
   const int source_row = filtered_rows_.at(index.row());
   return source_model_->data(source_model_->index(source_row, 0), role);
 }
@@ -78,6 +141,7 @@ QHash<int, QByteArray> FilterModel::roleNames() const {
   static const QHash<int, QByteArray> roles{
       {SourceRowRole, "sourceRow"},
       {LineNoRole, "lineNo"},
+      {ProcessNameRole, "processName"},
       {FunctionNameRole, "functionName"},
       {LogLevelRole, "logLevel"},
       {MarkedRole, "marked"},
@@ -146,6 +210,12 @@ QString FilterModel::plainTextAt(int row) const {
     return {};
   }
 
+  if (source_model_->source()) {
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line && window ? messageTextFromWindow(*window, *line) : QString{};
+  }
+
   const int source_row = sourceRowAt(row);
   return source_row >= 0 ? source_model_->plainTextAt(source_row) : QString{};
 }
@@ -153,6 +223,12 @@ QString FilterModel::plainTextAt(int row) const {
 QString FilterModel::rawTextAt(int row) const {
   if (!source_model_) {
     return {};
+  }
+
+  if (source_model_->source()) {
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, true, &window);
+    return line && window ? fromView(window->rawText(*line)) : QString{};
   }
 
   const int source_row = sourceRowAt(row);
@@ -180,18 +256,91 @@ int FilterModel::proxyRowAtOrAfterSourceRow(int source_row) const {
   return filtered_rows_.size() - 1;
 }
 
+const SourceWindowLine* FilterModel::lineAtRow(int row, bool raw,
+                                               const SourceWindow** window) const {
+  if (window) {
+    *window = nullptr;
+  }
+  if (!source_model_ || !source_model_->source() || row < 0 || row >= rowCount()) {
+    return nullptr;
+  }
+
+  constexpr int kWindowRows = 128;
+  constexpr int kLeadingMarginRows = 32;
+  auto& cache = raw ? raw_window_ : parsed_window_;
+  if (!cache.source_window || row < cache.logical_first || row >= cache.logical_last) {
+    const int logical_first = std::max(0, row - kLeadingMarginRows);
+    const int logical_last = std::min(rowCount(), logical_first + kWindowRows);
+    if (logical_first >= logical_last) {
+      cache = SparseWindowCache{};
+      return nullptr;
+    }
+
+    cache.logical_first = logical_first;
+    cache.logical_last = logical_last;
+    cache.raw = raw;
+    cache.source_rows = filtered_rows_.mid(logical_first, logical_last - logical_first);
+    const int first_source_row = cache.source_rows.front();
+    const int last_source_row = cache.source_rows.back();
+    cache.source_window = source_model_->source()->windowForSourceRange(
+        static_cast<uint64_t>(first_source_row),
+        static_cast<size_t>(last_source_row - first_source_row + 1), raw);
+  }
+
+  if (!cache.source_window) {
+    return nullptr;
+  }
+
+  const int source_row = filtered_rows_.at(row);
+  if (window) {
+    *window = cache.source_window.get();
+  }
+  return cache.source_window->lineForSourceRow(static_cast<uint64_t>(source_row));
+}
+
+void FilterModel::clearCachedWindows() const {
+  parsed_window_ = SparseWindowCache{};
+  raw_window_ = SparseWindowCache{};
+}
+
 int FilterModel::lineNoAt(int row) const {
   if (!source_model_) {
     return 0;
+  }
+
+  if (source_model_->source()) {
+    const int source_row = sourceRowAt(row);
+    return source_row >= 0 ? source_row + 1 : 0;
   }
 
   const int source_row = sourceRowAt(row);
   return source_row >= 0 ? source_model_->lineNoAt(source_row) : 0;
 }
 
+QString FilterModel::processNameAt(int row) const {
+  if (!source_model_) {
+    return {};
+  }
+
+  if (source_model_->source()) {
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line && window ? processNameFromWindow(*window, *line, scannerName()) : QString{};
+  }
+
+  const int source_row = sourceRowAt(row);
+  return source_row >= 0 ? source_model_->processNameAt(source_row) : QString{};
+}
+
 int FilterModel::logLevelAt(int row) const {
   if (!source_model_) {
     return static_cast<int>(LogLevel_Info);
+  }
+
+  if (source_model_->source()) {
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line ? static_cast<int>(line->log_level) : static_cast<int>(LogLevel_Info);
   }
 
   const int source_row = sourceRowAt(row);
@@ -203,6 +352,12 @@ int FilterModel::pidAt(int row) const {
     return 0;
   }
 
+  if (source_model_->source()) {
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line ? static_cast<int>(line->pid) : 0;
+  }
+
   const int source_row = sourceRowAt(row);
   return source_row >= 0 ? source_model_->pidAt(source_row) : 0;
 }
@@ -210,6 +365,12 @@ int FilterModel::pidAt(int row) const {
 int FilterModel::tidAt(int row) const {
   if (!source_model_) {
     return 0;
+  }
+
+  if (source_model_->source()) {
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line ? static_cast<int>(line->tid) : 0;
   }
 
   const int source_row = sourceRowAt(row);
@@ -230,17 +391,13 @@ QVariantList FilterModel::systemdProcesses() const {
 
   QSet<QString> active_processes;
   if (auto* source = source_model_->source()) {
-    const auto snapshot = source->snapshot();
-    source->visitLineViews(0, static_cast<size_t>(snapshot.line_count),
-                           [&active_processes](const SourceLineView& line) {
-                             const auto name = QString::fromUtf8(
-                                 line.functionNameText().data(),
-                                 static_cast<qsizetype>(line.functionNameText().size())).trimmed();
-                             if (!name.isEmpty()) {
-                               active_processes.insert(name);
-                             }
-                             return true;
-                           });
+    const auto process_names = source->systemdProcessNames();
+    for (const auto& name : process_names) {
+      const auto trimmed = QString::fromStdString(name).trimmed();
+      if (!trimmed.isEmpty()) {
+        active_processes.insert(trimmed);
+      }
+    }
   } else {
     for (int row = 0; row < source_model_->rowCount(); ++row) {
       const auto name = source_model_->functionNameAt(row).trimmed();
@@ -329,6 +486,7 @@ void FilterModel::refresh() {
 
 void FilterModel::prepareForRelease() {
   refresh_timer_.stop();
+  clearCachedWindows();
   if (source_model_) {
     disconnect(source_model_, nullptr, this, nullptr);
     source_model_ = nullptr;
@@ -450,62 +608,9 @@ bool FilterModel::matchesSourceRow(int source_row) const {
   }
 
   const bool has_text_filter = !pattern_.isEmpty();
-  const bool can_use_raw_fast_path = raw_ && has_text_filter && selected_pid_ == 0
-      && selected_process_name_.isEmpty();
   if (!any_level_enabled && !has_text_filter && selected_pid_ == 0
       && selected_process_name_.isEmpty()) {
     return true;
-  }
-
-  if (auto* source = source_model_->source()) {
-    const auto view = can_use_raw_fast_path
-        ? source->rawLineViewAt(static_cast<uint64_t>(source_row))
-        : source->lineViewAt(static_cast<uint64_t>(source_row));
-    if (!view.has_value()) {
-      return false;
-    }
-
-    if (selected_pid_ > 0 && static_cast<int>(view->pid) != selected_pid_) {
-      return false;
-    }
-
-    if (!selected_process_name_.isEmpty()
-        && QString::compare(QString::fromUtf8(view->functionNameText().data(),
-                                              static_cast<qsizetype>(view->functionNameText().size())),
-                            selected_process_name_, Qt::CaseSensitive) != 0) {
-      return false;
-    }
-
-    if (any_level_enabled) {
-      const int level = static_cast<int>(view->log_level);
-      if (level < 0 || level >= static_cast<int>(enabled_levels_.size())
-          || !enabled_levels_.at(static_cast<size_t>(level))) {
-        return false;
-      }
-    }
-
-    if (!has_text_filter) {
-      return true;
-    }
-
-    if (!regex_ && !case_insensitive_) {
-      const auto needle = pattern_.toUtf8();
-      return containsText(searchTextFor(*view, raw_),
-                          std::string_view(needle.constData(), static_cast<size_t>(needle.size())));
-    }
-
-    const auto text_view = searchTextFor(*view, raw_);
-    const QString text = QString::fromUtf8(text_view.data(),
-                                           static_cast<qsizetype>(text_view.size()));
-    if (!regex_) {
-      return text.contains(pattern_, case_insensitive_ ? Qt::CaseInsensitive : Qt::CaseSensitive);
-    }
-
-    if (!compiled_regex_.isValid()) {
-      return false;
-    }
-
-    return compiled_regex_.match(text).hasMatch();
   }
 
   if (selected_pid_ > 0 && source_model_->pidAt(source_row) != selected_pid_) {
@@ -620,6 +725,7 @@ void FilterModel::rebuildFilter() {
 
   beginResetModel();
   filtered_rows_ = std::move(next_rows);
+  clearCachedWindows();
   endResetModel();
 
   if (dirty_) {
@@ -650,6 +756,7 @@ void FilterModel::updateRegex() {
 }
 
 void FilterModel::onSourceRowsChanged() {
+  clearCachedWindows();
   if (auto_refresh_) {
     scheduleRefresh();
   } else {
@@ -658,6 +765,7 @@ void FilterModel::onSourceRowsChanged() {
 }
 
 void FilterModel::onSourceDataChanged(int first_row, int last_row, const QList<int>& roles) {
+  clearCachedWindows();
   bool affects_filter = roles.isEmpty();
   bool affects_marks = roles.isEmpty();
   for (const int role : roles) {

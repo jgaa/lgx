@@ -675,6 +675,8 @@ Item {
                 required property int sourceRow
                 required property string message
                 required property string rawMessage
+                required property string processName
+                required property int pid
                 required property int lineNo
                 required property int logLevel
                 required property bool marked
@@ -685,6 +687,25 @@ Item {
                 readonly property bool hasTimestamp: date && date.toString().length > 0
                 readonly property bool showLevelBadge: !!root.rowModel
                     && root.rowModel.scannerName !== "None"
+                readonly property bool showProcessBanner: !!root.rowModel
+                    && (root.rowModel.scannerName === "Logcat" || root.rowModel.scannerName === "Systemd")
+                readonly property string processBannerText: {
+                    if (!showProcessBanner) {
+                        return ""
+                    }
+
+                    const trimmedName = processName ? processName.trim() : ""
+                    if (trimmedName.length > 0 && pid > 0) {
+                        return trimmedName + "[" + pid + "]"
+                    }
+                    if (trimmedName.length > 0) {
+                        return trimmedName
+                    }
+                    if (pid > 0) {
+                        return String(pid)
+                    }
+                    return ""
+                }
                 readonly property string formattedTimestamp: hasTimestamp
                     ? date.toString("yyyy-MM-dd HH:mm:ss.zzz")
                     : ""
@@ -785,6 +806,17 @@ Item {
                         }
 
                         Label {
+                            id: processLabel
+                            visible: rowDelegate.processBannerText.length > 0
+                            text: rowDelegate.processBannerText
+                            color: Qt.darker(root.levelForegroundColor(logLevel), 1.05)
+                            font.family: UiSettings.logFontFamily
+                            font.pixelSize: rowFontPixelSize
+                            font.bold: true
+                            renderType: Text.NativeRendering
+                        }
+
+                        Label {
                             id: timestampLabel
                             visible: rowDelegate.hasTimestamp
                             text: rowDelegate.formattedTimestamp
@@ -801,8 +833,10 @@ Item {
                                 ? Math.max(0, contentArea.width
                                               - lineNumberLabel.implicitWidth
                                               - (levelBadge.visible ? levelBadge.implicitWidth : 0)
+                                              - (processLabel.visible ? processLabel.implicitWidth : 0)
                                               - (timestampLabel.visible ? timestampLabel.implicitWidth : 0)
                                               - (contentRow.spacing * ((levelBadge.visible ? 1 : 0)
+                                                                       + (processLabel.visible ? 1 : 0)
                                                                        + (timestampLabel.visible ? 1 : 0)
                                                                        + 1))
                                               - 12)

@@ -1,5 +1,6 @@
 #include "LogSource.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace lgx {
@@ -22,49 +23,46 @@ std::string_view sliceSpan(std::string_view text, TextSpan span) noexcept {
 
 }  // namespace
 
-std::string_view SourceLineView::rawText() const noexcept {
-  if (page) {
-    return page->lineAt(line_index_in_page);
-  }
-  if (owned_raw_text) {
-    return *owned_raw_text;
-  }
-  return {};
+bool SourceWindow::containsSourceRow(uint64_t source_row) const noexcept {
+  return source_row >= first_source_row_ && source_row < last_source_row_;
 }
 
-std::string_view SourceLineView::functionNameText() const noexcept {
-  if (page) {
-    return sliceSpan(rawText(), function_name);
+const SourceWindowLine* SourceWindow::lineForSourceRow(uint64_t source_row) const noexcept {
+  if (!containsSourceRow(source_row)) {
+    return nullptr;
   }
-  if (owned_function_name) {
-    return *owned_function_name;
+
+  const auto it = std::lower_bound(
+      lines_.cbegin(), lines_.cend(), source_row,
+      [](const SourceWindowLine& line, uint64_t row) { return line.source_row < row; });
+  if (it == lines_.cend() || it->source_row != source_row) {
+    return nullptr;
   }
-  return {};
+  return &(*it);
 }
 
-std::string_view SourceLineView::messageText() const noexcept {
-  if (page) {
-    return sliceSpan(rawText(), message);
+std::string_view SourceWindow::rawText(const SourceWindowLine& line) const noexcept {
+  if (line.page_slot >= pages_.size() || !pages_[line.page_slot]) {
+    return {};
   }
-  if (owned_message) {
-    return *owned_message;
-  }
-  return {};
+  return pages_[line.page_slot]->lineAt(line.line_index_in_page);
 }
 
-std::string_view SourceLineView::plainText() const noexcept {
-  const auto message_text = messageText();
-  return message_text.empty() ? rawText() : message_text;
+std::string_view SourceWindow::functionNameText(const SourceWindowLine& line) const noexcept {
+  return sliceSpan(rawText(line), line.function_name);
 }
 
-std::string_view SourceLineView::threadIdText() const noexcept {
-  if (page) {
-    return sliceSpan(rawText(), thread_id);
-  }
-  if (owned_thread_id) {
-    return *owned_thread_id;
-  }
-  return {};
+std::string_view SourceWindow::messageText(const SourceWindowLine& line) const noexcept {
+  return sliceSpan(rawText(line), line.message);
+}
+
+std::string_view SourceWindow::plainText(const SourceWindowLine& line) const noexcept {
+  const auto message_text = messageText(line);
+  return message_text.empty() ? rawText(line) : message_text;
+}
+
+std::string_view SourceWindow::threadIdText(const SourceWindowLine& line) const noexcept {
+  return sliceSpan(rawText(line), line.thread_id);
 }
 
 std::atomic_size_t LogSource::source_id_feed_{0};
@@ -77,6 +75,62 @@ size_t LogSource::PageMeta::levelLines(LogLevel level) const noexcept {
 void LogSource::PageMeta::setLevelLines(LogLevel level, size_t lines) noexcept {
   assert(level >= LogLevel_Error && level <= LogLevel_Trace);
   level_lines_[static_cast<size_t>(level)] = lines;
+}
+
+void LogSource::PageMeta::startBuildingIndexedLines() {
+  indexed_lines_.clear();
+  building_indexed_lines_.clear();
+}
+
+void LogSource::PageMeta::appendIndexedLine(IndexedLine line) {
+  if (!building_indexed_lines_.empty() || indexed_lines_.empty()) {
+    building_indexed_lines_.push_back(std::move(line));
+    return;
+  }
+
+  indexed_lines_.push_back(std::move(line));
+}
+
+void LogSource::PageMeta::extendLastIndexedLine(size_t stored_bytes) {
+  if (!building_indexed_lines_.empty()) {
+    building_indexed_lines_.back().length =
+        static_cast<uint32_t>(building_indexed_lines_.back().length + stored_bytes);
+    return;
+  }
+
+  if (!indexed_lines_.empty()) {
+    indexed_lines_.back().length = static_cast<uint32_t>(indexed_lines_.back().length + stored_bytes);
+  }
+}
+
+void LogSource::PageMeta::finalizeIndexedLines() {
+  if (building_indexed_lines_.empty()) {
+    if (indexed_lines_.empty()) {
+      indexed_lines_.shrink_to_fit();
+    }
+    return;
+  }
+
+  indexed_lines_.assign(building_indexed_lines_.begin(), building_indexed_lines_.end());
+  building_indexed_lines_.clear();
+}
+
+bool LogSource::PageMeta::isBuildingIndexedLines() const noexcept {
+  return !building_indexed_lines_.empty();
+}
+
+const LogSource::PageMeta::IndexedLine& LogSource::PageMeta::indexedLine(size_t index) const {
+  if (!building_indexed_lines_.empty()) {
+    return building_indexed_lines_.at(index);
+  }
+  return indexed_lines_.at(index);
+}
+
+LogSource::PageMeta::IndexedLine& LogSource::PageMeta::indexedLine(size_t index) {
+  if (!building_indexed_lines_.empty()) {
+    return building_indexed_lines_.at(index);
+  }
+  return indexed_lines_.at(index);
 }
 
 void LogSource::PageMeta::clearLineIndex() noexcept {
@@ -142,80 +196,20 @@ double LogSource::linesPerSecond() const {
   return currentLinesPerSecond(std::chrono::steady_clock::now());
 }
 
-void LogSource::fetchLines(uint64_t, size_t, std::function<void(SourceLines)> on_ready) {
-  if (on_ready) {
-    on_ready({});
-  }
+std::vector<uint32_t> LogSource::logcatPids() const {
+  return {};
 }
 
-std::optional<SourceLineView> LogSource::lineViewAt(uint64_t line_number) {
-  std::optional<SourceLineView> result;
-  fetchLines(line_number, 1, [&result](SourceLines lines) {
-    if (lines.lines.empty()) {
-      return;
-    }
-
-    const auto& line = lines.lines.front();
-    SourceLineView view;
-    view.line_number = line.line_number;
-    view.log_level = line.log_level;
-    view.pid = line.pid;
-    view.tid = line.tid;
-    view.owned_raw_text = std::make_shared<std::string>(line.text);
-    if (!line.function_name.empty()) {
-      view.owned_function_name = std::make_shared<std::string>(line.function_name);
-    }
-    if (!line.message.empty()) {
-      view.owned_message = std::make_shared<std::string>(line.message);
-    }
-    if (!line.thread_id.empty()) {
-      view.owned_thread_id = std::make_shared<std::string>(line.thread_id);
-    }
-    if (line.timestamp.has_value()) {
-      view.timestamp_msecs_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(
-          line.timestamp->time_since_epoch()).count();
-    }
-    result = std::move(view);
-  });
-  return result;
+std::vector<std::string> LogSource::systemdProcessNames() const {
+  return {};
 }
 
-std::optional<SourceLineView> LogSource::rawLineViewAt(uint64_t line_number) {
-  return lineViewAt(line_number);
-}
-
-void LogSource::visitLineViews(uint64_t first_line, size_t count,
-                               std::function<bool(const SourceLineView&)> visitor) {
-  if (!visitor || count == 0) {
-    return;
-  }
-
-  for (size_t index = 0; index < count; ++index) {
-    const auto view = lineViewAt(first_line + index);
-    if (!view.has_value()) {
-      continue;
-    }
-    if (!visitor(*view)) {
-      break;
-    }
-  }
-}
-
-void LogSource::visitRawLineViews(uint64_t first_line, size_t count,
-                                  std::function<bool(const SourceLineView&)> visitor) {
-  if (!visitor || count == 0) {
-    return;
-  }
-
-  for (size_t index = 0; index < count; ++index) {
-    const auto view = rawLineViewAt(first_line + index);
-    if (!view.has_value()) {
-      continue;
-    }
-    if (!visitor(*view)) {
-      break;
-    }
-  }
+std::shared_ptr<const SourceWindow> LogSource::windowForSourceRange(uint64_t first_line,
+                                                                    size_t, bool) {
+  auto window = std::make_shared<SourceWindow>();
+  window->first_source_row_ = first_line;
+  window->last_source_row_ = first_line;
+  return window;
 }
 
 std::optional<uint64_t> LogSource::nextLineWithLevel(uint64_t, LogLevel) const {

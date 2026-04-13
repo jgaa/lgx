@@ -39,31 +39,65 @@ class CountingLogSource final : public LogSource {
     emitStateChanged(snapshot());
   }
 
-  void fetchLines(uint64_t first_line, size_t count,
-                  std::function<void(SourceLines)> on_ready) override {
-    ++fetch_lines_calls;
-    SourceLines lines;
-    lines.first_line = first_line;
-    if (first_line < entries_.size() && count > 0) {
-      const auto actual = std::min(count, entries_.size() - static_cast<size_t>(first_line));
-      lines.lines.reserve(actual);
-      for (size_t index = 0; index < actual; ++index) {
-        const auto& entry = entries_.at(static_cast<size_t>(first_line) + index);
-        lines.lines.push_back(SourceLine{
-            .line_number = first_line + index,
-            .log_level = entry.level,
-            .pid = static_cast<uint32_t>(entry.pid),
-            .tid = static_cast<uint32_t>(entry.tid),
-            .text = entry.raw_message.toStdString(),
-            .function_name = entry.function_name.toStdString(),
-            .message = entry.message.toStdString(),
-        });
-      }
+  [[nodiscard]] std::shared_ptr<const SourceWindow> windowForSourceRange(
+      uint64_t first_line, size_t count, bool raw) override {
+    if (raw) {
+      ++raw_line_view_calls;
+    } else {
+      ++line_view_calls;
     }
 
-    if (on_ready) {
-      on_ready(std::move(lines));
+    auto window = std::make_shared<SourceWindow>();
+    if (count == 0 || first_line >= entries_.size()) {
+      return window;
     }
+
+    const auto last_line =
+        std::min<uint64_t>(entries_.size(), first_line + count);
+    window->first_source_row_ = first_line;
+    window->last_source_row_ = last_line;
+    window->pages_.reserve(static_cast<size_t>(last_line - first_line));
+    window->lines_.reserve(static_cast<size_t>(last_line - first_line));
+
+    for (uint64_t line_number = first_line; line_number < last_line; ++line_number) {
+      const auto& entry = entries_.at(static_cast<size_t>(line_number));
+      std::string raw_text = entry.raw_message.toStdString();
+      std::string full_text = raw_text;
+      TextSpan function_name;
+      TextSpan message;
+      if (!raw && !entry.function_name.isEmpty()) {
+        full_text = entry.function_name.toStdString();
+        full_text += ": ";
+        const auto message_offset = static_cast<int32_t>(full_text.size());
+        full_text += entry.message.toStdString();
+        function_name = TextSpan{.offset = 0,
+                                 .length = static_cast<uint32_t>(entry.function_name.size())};
+        message = TextSpan{.offset = message_offset,
+                           .length = static_cast<uint32_t>(entry.message.toStdString().size())};
+      } else if (!raw && !entry.message.isEmpty()) {
+        full_text = entry.message.toStdString();
+        message = TextSpan{.offset = 0,
+                           .length = static_cast<uint32_t>(entry.message.toStdString().size())};
+      }
+
+      const auto page_slot = static_cast<uint32_t>(window->pages_.size());
+      window->pages_.push_back(PageData::fromText((raw ? raw_text : full_text) + '\n',
+                                                  {entry.level}));
+      window->lines_.push_back(SourceWindowLine{
+          .source_row = line_number,
+          .log_level = entry.level,
+          .pid = static_cast<uint32_t>(entry.pid),
+          .tid = static_cast<uint32_t>(entry.tid),
+          .function_name = function_name,
+          .message = message,
+          .thread_id = {},
+          .timestamp_msecs_since_epoch = -1,
+          .page_slot = page_slot,
+          .line_index_in_page = 0,
+      });
+    }
+
+    return window;
   }
 
   [[nodiscard]] std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
@@ -97,44 +131,6 @@ class CountingLogSource final : public LogSource {
     }
     return std::nullopt;
   }
-
-  [[nodiscard]] std::optional<SourceLineView> lineViewAt(uint64_t line_number) override {
-    ++line_view_calls;
-    if (line_number >= entries_.size()) {
-      return std::nullopt;
-    }
-
-    const auto& entry = entries_.at(static_cast<size_t>(line_number));
-    SourceLineView view;
-    view.line_number = line_number;
-    view.log_level = entry.level;
-    view.pid = static_cast<uint32_t>(entry.pid);
-    view.tid = static_cast<uint32_t>(entry.tid);
-    view.owned_raw_text = std::make_shared<std::string>(entry.raw_message.toStdString());
-    view.owned_message = std::make_shared<std::string>(entry.message.toStdString());
-    if (!entry.function_name.isEmpty()) {
-      view.owned_function_name = std::make_shared<std::string>(entry.function_name.toStdString());
-    }
-    return view;
-  }
-
-  [[nodiscard]] std::optional<SourceLineView> rawLineViewAt(uint64_t line_number) override {
-    ++raw_line_view_calls;
-    if (line_number >= entries_.size()) {
-      return std::nullopt;
-    }
-
-    const auto& entry = entries_.at(static_cast<size_t>(line_number));
-    SourceLineView view;
-    view.line_number = line_number;
-    view.log_level = entry.level;
-    view.pid = static_cast<uint32_t>(entry.pid);
-    view.tid = static_cast<uint32_t>(entry.tid);
-    view.owned_raw_text = std::make_shared<std::string>(entry.raw_message.toStdString());
-    return view;
-  }
-
-  mutable int fetch_lines_calls{0};
   mutable int next_line_calls{0};
   mutable int previous_line_calls{0};
   mutable int line_view_calls{0};
@@ -431,7 +427,6 @@ TEST(FilterModelTests, PureLevelFilteringUsesSourceLevelNavigationWithoutFetchin
   EXPECT_EQ(filter_model.sourceRowAt(0), 1);
   EXPECT_EQ(filter_model.sourceRowAt(1), 2);
   EXPECT_GT(source_ptr->next_line_calls, 0);
-  EXPECT_EQ(source_ptr->fetch_lines_calls, 0);
 }
 
 TEST(FilterModelTests, MixedPidAndLevelFilteringDoesNotUseSourceLevelNavigationShortcut) {
@@ -593,19 +588,16 @@ TEST(FilterModelTests, LogModelExposesSourceBackedRowCountWithoutFetchingRows) {
   source_model.setSource(std::move(source));
   source_model.loadFromSource();
 
-  EXPECT_EQ(source_ptr->fetch_lines_calls, 0);
   EXPECT_EQ(source_ptr->line_view_calls, 0);
   EXPECT_EQ(source_model.rowCount(), 2);
 
   const auto index = source_model.index(0, 0);
   ASSERT_TRUE(index.isValid());
   EXPECT_EQ(source_model.data(index, LogModel::MessageRole).toString(), QStringLiteral("first"));
-  EXPECT_EQ(source_ptr->fetch_lines_calls, 0);
   EXPECT_EQ(source_ptr->line_view_calls, 1);
 
   source_model.setCurrent(true);
   EXPECT_EQ(source_model.plainTextAt(1), QStringLiteral("second"));
-  EXPECT_EQ(source_ptr->fetch_lines_calls, 0);
   EXPECT_EQ(source_ptr->line_view_calls, 2);
 }
 

@@ -53,6 +53,7 @@ class LogModel final : public QAbstractListModel {
   enum Role {
     SourceRowRole = Qt::UserRole + 1,
     LineNoRole,
+    ProcessNameRole,
     FunctionNameRole,
     LogLevelRole,
     MarkedRole,
@@ -77,6 +78,7 @@ class LogModel final : public QAbstractListModel {
   Q_INVOKABLE QString rawTextAt(int row) const;
   Q_INVOKABLE int sourceRowAt(int row) const;
   Q_INVOKABLE int lineNoAt(int row) const;
+  Q_INVOKABLE QString processNameAt(int row) const;
   Q_INVOKABLE QString functionNameAt(int row) const;
   Q_INVOKABLE int logLevelAt(int row) const;
   Q_INVOKABLE int pidAt(int row) const;
@@ -160,7 +162,13 @@ signals:
   void setActive(bool active);
   void refreshSourceMetrics();
   void syncSourceRowCount(uint64_t next_row_count, bool force_reset = false);
-  [[nodiscard]] std::optional<SourceLineView> lineViewAt(int row) const;
+  struct CachedWindow {
+    std::shared_ptr<const SourceWindow> window;
+    bool raw{false};
+  };
+  [[nodiscard]] const SourceWindowLine* lineAtRow(int row, bool raw,
+                                                  const SourceWindow** window) const;
+  void clearCachedWindows();
   void beginCatchUp();
   void logSourceReady(uint64_t line_count);
   void updateSourceStatus(const SourceSnapshot& snapshot);
@@ -181,6 +189,8 @@ signals:
   qulonglong file_size_{0};
   int row_count_cache_{0};
   std::optional<std::chrono::steady_clock::time_point> catch_up_started_at_;
+  mutable CachedWindow parsed_window_;
+  mutable CachedWindow raw_window_;
   QTimer active_timer_;
   QTimer source_metrics_timer_;
 };

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -12,6 +13,17 @@
 
 namespace lgx {
 namespace {
+
+struct WindowRow {
+  std::string raw_text;
+  std::string function_name;
+  std::string message;
+  std::string thread_id;
+  LogLevel log_level{LogLevel_Info};
+  uint32_t pid{};
+  uint32_t tid{};
+  bool has_timestamp{false};
+};
 
 std::filesystem::path writeFile(const std::filesystem::path& path, std::string_view text) {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -34,6 +46,34 @@ bool waitFor(Predicate&& predicate, std::chrono::milliseconds timeout = std::chr
   return predicate();
 }
 
+std::vector<WindowRow> readWindowRows(LogSource& source, uint64_t first_line, size_t count,
+                                      bool raw = false) {
+  std::vector<WindowRow> rows;
+  const auto window = source.windowForSourceRange(first_line, count, raw);
+  if (!window) {
+    return rows;
+  }
+
+  for (const auto& line : window->lines_) {
+    if (line.source_row < first_line || line.source_row >= first_line + count) {
+      continue;
+    }
+
+    rows.push_back(WindowRow{
+        .raw_text = std::string(window->rawText(line)),
+        .function_name = std::string(window->functionNameText(line)),
+        .message = std::string(window->messageText(line)),
+        .thread_id = std::string(window->threadIdText(line)),
+        .log_level = line.log_level,
+        .pid = line.pid,
+        .tid = line.tid,
+        .has_timestamp = line.hasTimestamp(),
+    });
+  }
+
+  return rows;
+}
+
 TEST(FileSourceTests, IndexesAndFetchesLinesFromFile) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
@@ -49,12 +89,10 @@ TEST(FileSourceTests, IndexesAndFetchesLinesFromFile) {
   EXPECT_EQ(snapshot.line_count, 2U);
   EXPECT_EQ(snapshot.file_size, 16U);
 
-  SourceLines lines;
-  source.fetchLines(0, 3, [&lines](SourceLines fetched) { lines = std::move(fetched); });
-
-  ASSERT_EQ(lines.lines.size(), 2U);
-  EXPECT_EQ(lines.lines[0].text, "alpha");
-  EXPECT_EQ(lines.lines[1].text, "beta");
+  const auto rows = readWindowRows(source, 0, 3);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].raw_text, "alpha");
+  EXPECT_EQ(rows[1].raw_text, "beta");
 }
 
 TEST(FileSourceTests, RefreshDetectsAppendAndFetchesNewLines) {
@@ -86,11 +124,10 @@ TEST(FileSourceTests, RefreshDetectsAppendAndFetchesNewLines) {
   EXPECT_EQ(appended_first, 2U);
   EXPECT_EQ(appended_count, 2U);
 
-  SourceLines fetched;
-  source.fetchLines(2, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_EQ(fetched.lines[0].text, "three");
-  EXPECT_EQ(fetched.lines[1].text, "four");
+  const auto rows = readWindowRows(source, 2, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].raw_text, "three");
+  EXPECT_EQ(rows[1].raw_text, "four");
 }
 
 TEST(FileSourceTests, FollowingWatcherRefreshesOnAppend) {
@@ -107,11 +144,10 @@ TEST(FileSourceTests, FollowingWatcherRefreshesOnAppend) {
   writeFile(path, "one\ntwo\n");
   ASSERT_TRUE(waitFor([&source] { return source.snapshot().line_count == 2U; }));
 
-  SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_EQ(fetched.lines[0].text, "one");
-  EXPECT_EQ(fetched.lines[1].text, "two");
+  const auto rows = readWindowRows(source, 0, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].raw_text, "one");
+  EXPECT_EQ(rows[1].raw_text, "two");
 }
 
 TEST(FileSourceTests, FollowingEmptyFileDoesNotReportCatchingUp) {
@@ -167,13 +203,12 @@ TEST(FileSourceTests, RefreshCompletesPendingTailWithoutRescanningCommittedLines
   EXPECT_EQ(appended_first, 2U);
   EXPECT_EQ(appended_count, 2U);
 
-  SourceLines fetched;
-  source.fetchLines(0, 4, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 4U);
-  EXPECT_EQ(fetched.lines[0].text, "one");
-  EXPECT_EQ(fetched.lines[1].text, "two");
-  EXPECT_EQ(fetched.lines[2].text, "partial");
-  EXPECT_EQ(fetched.lines[3].text, "next");
+  const auto rows = readWindowRows(source, 0, 4);
+  ASSERT_EQ(rows.size(), 4U);
+  EXPECT_EQ(rows[0].raw_text, "one");
+  EXPECT_EQ(rows[1].raw_text, "two");
+  EXPECT_EQ(rows[2].raw_text, "partial");
+  EXPECT_EQ(rows[3].raw_text, "next");
 }
 
 TEST(FileSourceTests, RefreshDetectsTruncation) {
@@ -200,10 +235,9 @@ TEST(FileSourceTests, RefreshDetectsTruncation) {
   EXPECT_EQ(reset_reason, SourceResetReason::Truncated);
   EXPECT_EQ(source.snapshot().line_count, 1U);
 
-  SourceLines fetched;
-  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 1U);
-  EXPECT_EQ(fetched.lines[0].text, "short");
+  const auto rows = readWindowRows(source, 0, 1);
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows[0].raw_text, "short");
 }
 
 TEST(FileSourceTests, RefreshDetectsRecreatedFileIdentity) {
@@ -230,10 +264,9 @@ TEST(FileSourceTests, RefreshDetectsRecreatedFileIdentity) {
 
   EXPECT_EQ(reset_reason, SourceResetReason::Recreated);
 
-  SourceLines fetched;
-  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 1U);
-  EXPECT_EQ(fetched.lines[0].text, "after");
+  const auto rows = readWindowRows(source, 0, 1);
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows[0].raw_text, "after");
 }
 
 TEST(FileSourceTests, ResetInvalidatesAllCachedPages) {
@@ -247,9 +280,8 @@ TEST(FileSourceTests, ResetInvalidatesAllCachedPages) {
   source.open(path.string());
   source.startIndexing();
 
-  SourceLines fetched;
-  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 1U);
+  const auto rows = readWindowRows(source, 0, 1);
+  ASSERT_EQ(rows.size(), 1U);
 
   const PageKey page_key{source.sourceId(), 0};
   EXPECT_TRUE(source.sharedPageCache().contains(page_key));
@@ -287,13 +319,12 @@ TEST(FileSourceTests, LogfaultScannerMergesMultilineEventsDuringIndexing) {
   EXPECT_EQ(snapshot.state, SourceState::Ready);
   EXPECT_EQ(snapshot.line_count, 2U);
 
-  SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Trace);
-  EXPECT_NE(fetched.lines[0].text.find("VALUES (?, ?, ?, ?)"), std::string::npos);
-  EXPECT_NE(fetched.lines[0].text.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
-  EXPECT_NE(fetched.lines[1].text.find("| args: a, b, 1, 0"), std::string::npos);
+  const auto rows = readWindowRows(source, 0, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].log_level, LogLevel_Trace);
+  EXPECT_NE(rows[0].raw_text.find("VALUES (?, ?, ?, ?)"), std::string::npos);
+  EXPECT_NE(rows[0].raw_text.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
+  EXPECT_NE(rows[1].raw_text.find("| args: a, b, 1, 0"), std::string::npos);
 }
 
 TEST(FileSourceTests, LogfaultScannerExtendsPreviousEventWhenRefreshStartsWithContinuation) {
@@ -332,12 +363,11 @@ TEST(FileSourceTests, LogfaultScannerExtendsPreviousEventWhenRefreshStartsWithCo
   EXPECT_EQ(source.snapshot().line_count, 2U);
   EXPECT_EQ(appended_count, 1U);
 
-  SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_NE(fetched.lines[0].text.find("VALUES (?, ?, ?, ?)"), std::string::npos);
-  EXPECT_NE(fetched.lines[0].text.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
-  EXPECT_EQ(fetched.lines[1].text, "2026-04-01 18:49:13.004 EEST INFO 52208 Done");
+  const auto rows = readWindowRows(source, 0, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_NE(rows[0].raw_text.find("VALUES (?, ?, ?, ?)"), std::string::npos);
+  EXPECT_NE(rows[0].raw_text.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
+  EXPECT_EQ(rows[1].raw_text, "2026-04-01 18:49:13.004 EEST INFO 52208 Done");
 }
 
 TEST(FileSourceTests, GenericScannerRecognizesEarlyMixedCaseAndBracketedLevels) {
@@ -359,13 +389,12 @@ TEST(FileSourceTests, GenericScannerRecognizesEarlyMixedCaseAndBracketedLevels) 
   EXPECT_EQ(snapshot.state, SourceState::Ready);
   EXPECT_EQ(snapshot.line_count, 4U);
 
-  SourceLines fetched;
-  source.fetchLines(0, 4, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 4U);
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Warn);
-  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Error);
-  EXPECT_EQ(fetched.lines[2].log_level, LogLevel_Warn);
-  EXPECT_EQ(fetched.lines[3].log_level, LogLevel_Debug);
+  const auto rows = readWindowRows(source, 0, 4);
+  ASSERT_EQ(rows.size(), 4U);
+  EXPECT_EQ(rows[0].log_level, LogLevel_Warn);
+  EXPECT_EQ(rows[1].log_level, LogLevel_Error);
+  EXPECT_EQ(rows[2].log_level, LogLevel_Warn);
+  EXPECT_EQ(rows[3].log_level, LogLevel_Debug);
 }
 
 TEST(FileSourceTests, GenericScannerTreatsIndentedLinesAsContinuations) {
@@ -385,13 +414,12 @@ TEST(FileSourceTests, GenericScannerTreatsIndentedLinesAsContinuations) {
 
   EXPECT_EQ(source.snapshot().line_count, 2U);
 
-  SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Info);
-  EXPECT_NE(fetched.lines[0].text.find("stack trace line 1"), std::string::npos);
-  EXPECT_NE(fetched.lines[0].text.find("stack trace line 2"), std::string::npos);
-  EXPECT_EQ(fetched.lines[1].text, "2026-04-01 18:49:13.004 INFO done");
+  const auto rows = readWindowRows(source, 0, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].log_level, LogLevel_Info);
+  EXPECT_NE(rows[0].raw_text.find("stack trace line 1"), std::string::npos);
+  EXPECT_NE(rows[0].raw_text.find("stack trace line 2"), std::string::npos);
+  EXPECT_EQ(rows[1].raw_text, "2026-04-01 18:49:13.004 INFO done");
 }
 
 TEST(FileSourceTests, GenericScannerDoesNotMergeUnindentedJournalctlLines) {
@@ -413,16 +441,15 @@ TEST(FileSourceTests, GenericScannerDoesNotMergeUnindentedJournalctlLines) {
 
   EXPECT_EQ(source.snapshot().line_count, 5U);
 
-  SourceLines fetched;
-  source.fetchLines(0, 5, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 5U);
-  EXPECT_EQ(fetched.lines[0].text,
+  const auto rows = readWindowRows(source, 0, 5);
+  ASSERT_EQ(rows.size(), 5U);
+  EXPECT_EQ(rows[0].raw_text,
             "Hint: You are currently not seeing messages from other users and the system.");
-  EXPECT_EQ(fetched.lines[1].text,
+  EXPECT_EQ(rows[1].raw_text,
             "Users in groups 'adm', 'systemd-journal', 'wheel' can see all messages.");
-  EXPECT_EQ(fetched.lines[2].text, "Pass -q to turn off this notice.");
-  EXPECT_NE(fetched.lines[3].text.find("Cannot find Bluez 5 adapter"), std::string::npos);
-  EXPECT_NE(fetched.lines[4].text.find("Binding loop detected"), std::string::npos);
+  EXPECT_EQ(rows[2].raw_text, "Pass -q to turn off this notice.");
+  EXPECT_NE(rows[3].raw_text.find("Cannot find Bluez 5 adapter"), std::string::npos);
+  EXPECT_NE(rows[4].raw_text.find("Binding loop detected"), std::string::npos);
 }
 
 TEST(FileSourceTests, GenericScannerDefaultsToInfoWithoutEarlyLevelMatch) {
@@ -438,11 +465,10 @@ TEST(FileSourceTests, GenericScannerDefaultsToInfoWithoutEarlyLevelMatch) {
   source.setRequestedScannerName("Generic");
   source.startIndexing();
 
-  SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Info);
-  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Info);
+  const auto rows = readWindowRows(source, 0, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].log_level, LogLevel_Info);
+  EXPECT_EQ(rows[1].log_level, LogLevel_Info);
 }
 
 TEST(FileSourceTests, GenericScannerRecognizesDockerMariadbDualTimestampFormat) {
@@ -458,11 +484,10 @@ TEST(FileSourceTests, GenericScannerRecognizesDockerMariadbDualTimestampFormat) 
   source.setRequestedScannerName("Generic");
   source.startIndexing();
 
-  SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Notice);
-  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Warn);
+  const auto rows = readWindowRows(source, 0, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].log_level, LogLevel_Notice);
+  EXPECT_EQ(rows[1].log_level, LogLevel_Warn);
 }
 
 TEST(FileSourceTests, LogcatScannerPreservesPidAndNumericTid) {
@@ -477,12 +502,15 @@ TEST(FileSourceTests, LogcatScannerPreservesPidAndNumericTid) {
   source.setRequestedScannerName("Logcat");
   source.startIndexing();
 
-  SourceLines fetched;
-  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 1U);
-  EXPECT_EQ(fetched.lines[0].pid, 1234U);
-  EXPECT_EQ(fetched.lines[0].tid, 5678U);
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Warn);
+  const auto rows = readWindowRows(source, 0, 1);
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows[0].pid, 1234U);
+  EXPECT_EQ(rows[0].tid, 5678U);
+  EXPECT_EQ(rows[0].log_level, LogLevel_Warn);
+
+  const auto pids = source.logcatPids();
+  ASSERT_EQ(pids.size(), 1U);
+  EXPECT_EQ(pids[0], 1234U);
 }
 
 TEST(FileSourceTests, SystemdScannerParsesStructuredJournalFields) {
@@ -498,18 +526,22 @@ TEST(FileSourceTests, SystemdScannerParsesStructuredJournalFields) {
   source.setRequestedScannerName("Systemd");
   source.startIndexing();
 
-  SourceLines fetched;
-  source.fetchLines(0, 2, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 2U);
-  EXPECT_EQ(fetched.lines[0].pid, 1234U);
-  EXPECT_EQ(fetched.lines[0].tid, 5678U);
-  EXPECT_EQ(fetched.lines[0].function_name, "sshd");
-  EXPECT_EQ(fetched.lines[0].message, "Failed password for root");
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Error);
-  EXPECT_TRUE(fetched.lines[0].timestamp.has_value());
-  EXPECT_EQ(fetched.lines[1].function_name, "systemd");
-  EXPECT_EQ(fetched.lines[1].message, "Started Session 12");
-  EXPECT_EQ(fetched.lines[1].log_level, LogLevel_Info);
+  const auto rows = readWindowRows(source, 0, 2);
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(rows[0].pid, 1234U);
+  EXPECT_EQ(rows[0].tid, 5678U);
+  EXPECT_EQ(rows[0].function_name, "sshd");
+  EXPECT_EQ(rows[0].message, "Failed password for root");
+  EXPECT_EQ(rows[0].log_level, LogLevel_Error);
+  EXPECT_TRUE(rows[0].has_timestamp);
+  EXPECT_EQ(rows[1].function_name, "systemd");
+  EXPECT_EQ(rows[1].message, "Started Session 12");
+  EXPECT_EQ(rows[1].log_level, LogLevel_Info);
+
+  const auto process_names = source.systemdProcessNames();
+  ASSERT_EQ(process_names.size(), 2U);
+  EXPECT_TRUE(std::find(process_names.begin(), process_names.end(), "sshd") != process_names.end());
+  EXPECT_TRUE(std::find(process_names.begin(), process_names.end(), "systemd") != process_names.end());
 }
 
 TEST(FileSourceTests, SystemdScannerParsesFriendlyStreamMessages) {
@@ -524,15 +556,14 @@ TEST(FileSourceTests, SystemdScannerParsesFriendlyStreamMessages) {
   source.setRequestedScannerName("Systemd");
   source.startIndexing();
 
-  SourceLines fetched;
-  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 1U);
-  EXPECT_EQ(fetched.lines[0].pid, 2137U);
-  EXPECT_EQ(fetched.lines[0].function_name, "glogg");
-  EXPECT_EQ(fetched.lines[0].log_level, LogLevel_Warn);
-  EXPECT_EQ(fetched.lines[0].message,
+  const auto rows = readWindowRows(source, 0, 1);
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows[0].pid, 2137U);
+  EXPECT_EQ(rows[0].function_name, "glogg");
+  EXPECT_EQ(rows[0].log_level, LogLevel_Warn);
+  EXPECT_EQ(rows[0].message,
             "QFile::open: File (/tmp/nextapp-devel.log) already open");
-  EXPECT_TRUE(fetched.lines[0].timestamp.has_value());
+  EXPECT_TRUE(rows[0].has_timestamp);
 }
 
 TEST(FileSourceTests, SystemdScannerParsesJournalctlShortMessages) {
@@ -547,12 +578,11 @@ TEST(FileSourceTests, SystemdScannerParsesJournalctlShortMessages) {
   source.setRequestedScannerName("Systemd");
   source.startIndexing();
 
-  SourceLines fetched;
-  source.fetchLines(0, 1, [&fetched](SourceLines lines) { fetched = std::move(lines); });
-  ASSERT_EQ(fetched.lines.size(), 1U);
-  EXPECT_EQ(fetched.lines[0].pid, 4321U);
-  EXPECT_EQ(fetched.lines[0].function_name, "sudo");
-  EXPECT_TRUE(fetched.lines[0].timestamp.has_value());
+  const auto rows = readWindowRows(source, 0, 1);
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows[0].pid, 4321U);
+  EXPECT_EQ(rows[0].function_name, "sudo");
+  EXPECT_TRUE(rows[0].has_timestamp);
 }
 
 }  // namespace

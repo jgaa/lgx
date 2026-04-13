@@ -98,14 +98,10 @@ class StreamSource final : public LogSource {
   [[nodiscard]] SourceSnapshot snapshot() const override;
   [[nodiscard]] uint64_t fileSize() const override;
   [[nodiscard]] double linesPerSecond() const override;
-  void fetchLines(uint64_t first_line, size_t count,
-                  std::function<void(SourceLines)> on_ready) override;
-  [[nodiscard]] std::optional<SourceLineView> lineViewAt(uint64_t line_number) override;
-  [[nodiscard]] std::optional<SourceLineView> rawLineViewAt(uint64_t line_number) override;
-  void visitLineViews(uint64_t first_line, size_t count,
-                      std::function<bool(const SourceLineView&)> visitor) override;
-  void visitRawLineViews(uint64_t first_line, size_t count,
-                         std::function<bool(const SourceLineView&)> visitor) override;
+  [[nodiscard]] std::vector<uint32_t> logcatPids() const override;
+  [[nodiscard]] std::vector<std::string> systemdProcessNames() const override;
+  [[nodiscard]] std::shared_ptr<const SourceWindow> windowForSourceRange(
+      uint64_t first_line, size_t count, bool raw) override;
   [[nodiscard]] std::optional<uint64_t> nextLineWithLevel(uint64_t after_line,
                                                           LogLevel level) const override;
   [[nodiscard]] std::optional<uint64_t> previousLineWithLevel(uint64_t before_line,

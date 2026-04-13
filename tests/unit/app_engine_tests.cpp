@@ -104,6 +104,7 @@ TEST(AppEngineTests, LogModelExposesRequestedRoles) {
   const auto index = model.index(0, 0);
   ASSERT_TRUE(index.isValid());
   EXPECT_EQ(model.data(index, LogModel::LineNoRole).toLongLong(), 42);
+  EXPECT_EQ(model.data(index, LogModel::ProcessNameRole).toString(), QString{});
   EXPECT_EQ(model.data(index, LogModel::FunctionNameRole).toString(), QStringLiteral("worker"));
   EXPECT_EQ(model.data(index, LogModel::LogLevelRole).toInt(), static_cast<int>(LogLevel_Debug));
   EXPECT_EQ(model.data(index, LogModel::PidRole).toInt(), 1234);
@@ -116,6 +117,7 @@ TEST(AppEngineTests, LogModelExposesRequestedRoles) {
 
   const auto roles = model.roleNames();
   EXPECT_EQ(roles.value(LogModel::LineNoRole), QByteArray("lineNo"));
+  EXPECT_EQ(roles.value(LogModel::ProcessNameRole), QByteArray("processName"));
   EXPECT_EQ(roles.value(LogModel::FunctionNameRole), QByteArray("functionName"));
   EXPECT_EQ(roles.value(LogModel::LogLevelRole), QByteArray("logLevel"));
   EXPECT_EQ(roles.value(LogModel::PidRole), QByteArray("pid"));
@@ -348,6 +350,31 @@ TEST(AppEngineTests, ListsDistinctLogcatProcessesForCurrentSource) {
   engine.releaseLogModel(url);
 }
 
+TEST(AppEngineTests, SourceBackedLogcatRowsKeepMessageAndExposePidOnlyProcessInfo) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("logcat-display.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("04-02 16:12:43.821  1111  2222 I ActivityManager: booted\n"), 0);
+  file.close();
+
+  AppEngine engine;
+  const auto url = QUrl::fromLocalFile(path);
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+  ASSERT_NE(model, nullptr);
+  model->setRequestedScannerName(QStringLiteral("Logcat"));
+
+  const auto index = model->index(0, 0);
+  ASSERT_TRUE(index.isValid());
+  EXPECT_EQ(model->data(index, LogModel::MessageRole).toString(), QStringLiteral("booted"));
+  EXPECT_EQ(model->data(index, LogModel::ProcessNameRole).toString(), QString{});
+  EXPECT_EQ(model->pidAt(0), 1111);
+  EXPECT_EQ(model->plainTextAt(0), QStringLiteral("booted"));
+  engine.releaseLogModel(url);
+}
+
 TEST(AppEngineTests, ListsDistinctSystemdProcessesAlphabeticallyForCurrentSource) {
   ScopedTestSettings scoped_settings;
   QTemporaryDir dir;
@@ -374,6 +401,56 @@ TEST(AppEngineTests, ListsDistinctSystemdProcessesAlphabeticallyForCurrentSource
   EXPECT_EQ(processes.at(1).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("alpha"));
   EXPECT_EQ(processes.at(2).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("Beta"));
   EXPECT_EQ(processes.at(3).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("zeta"));
+  engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, SourceBackedSystemdRowsKeepMessageAndExposeProcessInfo) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("systemd-display.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("__REALTIME_TIMESTAMP=1712067163821000\tPRIORITY=3\t_PID=1234\t_COMM=sshd\tMESSAGE=Failed password for root\n"), 0);
+  file.close();
+
+  AppEngine engine;
+  const auto url = QUrl::fromLocalFile(path);
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+  ASSERT_NE(model, nullptr);
+  model->setRequestedScannerName(QStringLiteral("Systemd"));
+
+  const auto index = model->index(0, 0);
+  ASSERT_TRUE(index.isValid());
+  EXPECT_EQ(model->data(index, LogModel::MessageRole).toString(),
+            QStringLiteral("Failed password for root"));
+  EXPECT_EQ(model->data(index, LogModel::ProcessNameRole).toString(), QStringLiteral("sshd"));
+  EXPECT_EQ(model->pidAt(0), 1234);
+  EXPECT_EQ(model->plainTextAt(0), QStringLiteral("Failed password for root"));
+  engine.releaseLogModel(url);
+}
+
+TEST(AppEngineTests, SourceBackedLogfaultRowsDoNotExposeProcessInfo) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("logfault-display.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("2026-03-31 10:15:00.123 host INFO 42 {worker} hello\n"), 0);
+  file.close();
+
+  AppEngine engine;
+  const auto url = QUrl::fromLocalFile(path);
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+  ASSERT_NE(model, nullptr);
+  model->setRequestedScannerName(QStringLiteral("Logfault"));
+
+  const auto index = model->index(0, 0);
+  ASSERT_TRUE(index.isValid());
+  EXPECT_EQ(model->data(index, LogModel::MessageRole).toString(), QStringLiteral("hello"));
+  EXPECT_EQ(model->data(index, LogModel::ProcessNameRole).toString(), QString{});
+  EXPECT_EQ(model->plainTextAt(0), QStringLiteral("hello"));
   engine.releaseLogModel(url);
 }
 

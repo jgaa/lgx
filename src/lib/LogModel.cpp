@@ -10,26 +10,21 @@ namespace lgx {
 
 namespace {
 
-LogRow makeRow(const SourceLine& line) {
-  return LogRow{
-      .line_no = static_cast<qsizetype>(line.line_number + 1U),
-      .pid = line.pid,
-      .tid = line.tid,
-      .function_name = QString::fromStdString(line.function_name),
-      .log_level = line.log_level,
-      .raw_message = QString::fromStdString(line.text),
-      .message = QString::fromStdString(line.message.empty() ? line.text : line.message),
-      .date = line.timestamp ? QDateTime::fromMSecsSinceEpoch(
-                                   std::chrono::duration_cast<std::chrono::milliseconds>(
-                                       line.timestamp->time_since_epoch())
-                                       .count())
-                             : QDateTime{},
-      .thread_id = QString::fromStdString(line.thread_id),
-  };
-}
-
 QString fromView(std::string_view value) {
   return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
+}
+
+QString sourceBackedMessageText(const SourceWindow& window, const SourceWindowLine& line) {
+  const auto message_text = fromView(window.messageText(line));
+  return message_text.isEmpty() ? fromView(window.rawText(line)) : message_text;
+}
+
+QString sourceBackedProcessName(const SourceWindow& window, const SourceWindowLine& line,
+                                const QString& scanner_name) {
+  if (scanner_name == QStringLiteral("Systemd")) {
+    return fromView(window.functionNameText(line)).trimmed();
+  }
+  return {};
 }
 
 QString sourceLabel(const QUrl& source_url) {
@@ -61,6 +56,7 @@ LogModel::~LogModel() {
   source_metrics_timer_.stop();
   current_ = false;
   active_ = false;
+  clearCachedWindows();
 
   if (source_) {
     source_->setCallbacks({});
@@ -83,8 +79,10 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
 
   const auto mark_color = markColorAt(index.row());
   if (source_) {
-    const auto view = lineViewAt(index.row());
-    if (!view.has_value()) {
+    const bool use_raw_window = role == RawMessageRole;
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(index.row(), use_raw_window, &window);
+    if (!line || !window) {
       return {};
     }
 
@@ -92,31 +90,33 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
       case SourceRowRole:
         return index.row();
       case LineNoRole:
-        return QVariant::fromValue(static_cast<qsizetype>(view->line_number + 1U));
+        return QVariant::fromValue(static_cast<qsizetype>(line->source_row + 1U));
+      case ProcessNameRole:
+        return sourceBackedProcessName(*window, *line, scannerName());
       case FunctionNameRole:
-        return fromView(view->functionNameText());
+        return fromView(window->functionNameText(*line));
       case LogLevelRole:
-        return QVariant::fromValue(static_cast<int>(view->log_level));
+        return QVariant::fromValue(static_cast<int>(line->log_level));
       case PidRole:
-        return QVariant::fromValue(static_cast<qint64>(view->pid));
+        return QVariant::fromValue(static_cast<qint64>(line->pid));
       case TidRole:
-        return QVariant::fromValue(static_cast<qint64>(view->tid));
+        return QVariant::fromValue(static_cast<qint64>(line->tid));
       case MarkedRole:
         return mark_color != static_cast<int>(LineMark_None);
       case MarkColorRole:
         return QVariant::fromValue(mark_color);
       case RawMessageRole:
-        return fromView(view->rawText());
+        return fromView(window->rawText(*line));
       case MessageRole:
-        return fromView(view->plainText());
+        return sourceBackedMessageText(*window, *line);
       case DateRole:
-        return view->hasTimestamp()
-            ? QVariant::fromValue(QDateTime::fromMSecsSinceEpoch(view->timestamp_msecs_since_epoch))
+        return line->hasTimestamp()
+            ? QVariant::fromValue(QDateTime::fromMSecsSinceEpoch(line->timestamp_msecs_since_epoch))
             : QVariant::fromValue(QDateTime{});
       case TagsRole:
         return QStringList{};
       case ThreadIdRole:
-        return fromView(view->threadIdText());
+        return fromView(window->threadIdText(*line));
       default:
         return {};
     }
@@ -128,6 +128,8 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
       return index.row();
     case LineNoRole:
       return QVariant::fromValue(row.line_no);
+    case ProcessNameRole:
+      return QString{};
     case FunctionNameRole:
       return row.function_name;
     case LogLevelRole:
@@ -159,6 +161,7 @@ QHash<int, QByteArray> LogModel::roleNames() const {
   return {
       {SourceRowRole, "sourceRow"},
       {LineNoRole, "lineNo"},
+      {ProcessNameRole, "processName"},
       {FunctionNameRole, "functionName"},
       {LogLevelRole, "logLevel"},
       {MarkedRole, "marked"},
@@ -179,8 +182,9 @@ QString LogModel::plainTextAt(int row) const {
   }
 
   if (source_) {
-    const auto view = lineViewAt(row);
-    return view.has_value() ? fromView(view->plainText()) : QString{};
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line && window ? sourceBackedMessageText(*window, *line) : QString{};
   }
 
   const auto& log_row = rows_[static_cast<size_t>(row)];
@@ -193,8 +197,9 @@ QString LogModel::rawTextAt(int row) const {
   }
 
   if (source_) {
-    const auto view = lineViewAt(row);
-    return view.has_value() ? fromView(view->rawText()) : QString{};
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, true, &window);
+    return line && window ? fromView(window->rawText(*line)) : QString{};
   }
 
   return rows_[static_cast<size_t>(row)].raw_message;
@@ -214,11 +219,26 @@ int LogModel::lineNoAt(int row) const {
   }
 
   if (source_) {
-    const auto view = lineViewAt(row);
-    return view.has_value() ? static_cast<int>(view->line_number + 1U) : 0;
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, true, &window);
+    return line ? static_cast<int>(line->source_row + 1U) : 0;
   }
 
   return static_cast<int>(rows_[static_cast<size_t>(row)].line_no);
+}
+
+QString LogModel::processNameAt(int row) const {
+  if (row < 0 || row >= rowCount()) {
+    return {};
+  }
+
+  if (source_) {
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line && window ? sourceBackedProcessName(*window, *line, scannerName()) : QString{};
+  }
+
+  return {};
 }
 
 QString LogModel::functionNameAt(int row) const {
@@ -227,8 +247,9 @@ QString LogModel::functionNameAt(int row) const {
   }
 
   if (source_) {
-    const auto view = lineViewAt(row);
-    return view.has_value() ? fromView(view->functionNameText()) : QString{};
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, false, &window);
+    return line && window ? fromView(window->functionNameText(*line)) : QString{};
   }
 
   return rows_[static_cast<size_t>(row)].function_name;
@@ -240,8 +261,9 @@ int LogModel::logLevelAt(int row) const {
   }
 
   if (source_) {
-    const auto view = lineViewAt(row);
-    return view.has_value() ? static_cast<int>(view->log_level) : static_cast<int>(LogLevel_Info);
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, true, &window);
+    return line ? static_cast<int>(line->log_level) : static_cast<int>(LogLevel_Info);
   }
 
   return static_cast<int>(rows_[static_cast<size_t>(row)].log_level);
@@ -253,8 +275,9 @@ int LogModel::pidAt(int row) const {
   }
 
   if (source_) {
-    const auto view = lineViewAt(row);
-    return view.has_value() ? static_cast<int>(view->pid) : 0;
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, true, &window);
+    return line ? static_cast<int>(line->pid) : 0;
   }
 
   return static_cast<int>(rows_[static_cast<size_t>(row)].pid);
@@ -266,8 +289,9 @@ int LogModel::tidAt(int row) const {
   }
 
   if (source_) {
-    const auto view = lineViewAt(row);
-    return view.has_value() ? static_cast<int>(view->tid) : 0;
+    const SourceWindow* window = nullptr;
+    const auto* line = lineAtRow(row, true, &window);
+    return line ? static_cast<int>(line->tid) : 0;
   }
 
   return static_cast<int>(rows_[static_cast<size_t>(row)].tid);
@@ -490,6 +514,7 @@ void LogModel::setRows(std::vector<LogRow> rows) {
   rows_ = std::move(rows);
   marked_rows_.clear();
   row_count_cache_ = static_cast<int>(rows_.size());
+  clearCachedWindows();
   endResetModel();
   emit lineCountChanged();
 }
@@ -518,6 +543,7 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
     source_.reset();
   }
   source_ = std::move(source);
+  clearCachedWindows();
   marked_rows_.clear();
   reset_pending_ = false;
   if (!source_) {
@@ -656,6 +682,7 @@ void LogModel::syncSourceRowCount(uint64_t next_row_count, bool force_reset) {
   if (force_reset) {
     beginResetModel();
     row_count_cache_ = normalized;
+    clearCachedWindows();
     endResetModel();
     emit lineCountChanged();
     return;
@@ -668,6 +695,7 @@ void LogModel::syncSourceRowCount(uint64_t next_row_count, bool force_reset) {
   if (normalized < row_count_cache_) {
     beginResetModel();
     row_count_cache_ = normalized;
+    clearCachedWindows();
     endResetModel();
   } else {
     beginInsertRows({}, row_count_cache_, normalized - 1);
@@ -677,12 +705,32 @@ void LogModel::syncSourceRowCount(uint64_t next_row_count, bool force_reset) {
   emit lineCountChanged();
 }
 
-std::optional<SourceLineView> LogModel::lineViewAt(int row) const {
+const SourceWindowLine* LogModel::lineAtRow(int row, bool raw,
+                                            const SourceWindow** window) const {
+  if (window) {
+    *window = nullptr;
+  }
   if (!source_ || row < 0 || row >= rowCount()) {
-    return std::nullopt;
+    return nullptr;
   }
 
-  return source_->lineViewAt(static_cast<uint64_t>(row));
+  auto& cache = raw ? raw_window_ : parsed_window_;
+  if (!cache.window || !cache.window->containsSourceRow(static_cast<uint64_t>(row))) {
+    cache.window = source_->windowForSourceRange(static_cast<uint64_t>(row), 1, raw);
+    cache.raw = raw;
+  }
+  if (!cache.window) {
+    return nullptr;
+  }
+  if (window) {
+    *window = cache.window.get();
+  }
+  return cache.window->lineForSourceRow(static_cast<uint64_t>(row));
+}
+
+void LogModel::clearCachedWindows() {
+  parsed_window_.window.reset();
+  raw_window_.window.reset();
 }
 
 void LogModel::beginCatchUp() {

@@ -977,14 +977,12 @@ QVariantList AppEngine::logcatProcessesForSource(const QUrl& url) const {
 
   QSet<int> active_pids;
   if (auto* source = model->source()) {
-    const auto snapshot = source->snapshot();
-    source->visitLineViews(0, static_cast<size_t>(snapshot.line_count),
-                           [&active_pids](const SourceLineView& line) {
-                             if (line.pid > 0) {
-                               active_pids.insert(static_cast<int>(line.pid));
-                             }
-                             return true;
-                           });
+    const auto source_pids = source->logcatPids();
+    for (const auto pid : source_pids) {
+      if (pid > 0) {
+        active_pids.insert(static_cast<int>(pid));
+      }
+    }
   } else {
     for (int row = 0; row < model->rowCount(); ++row) {
       const int pid = model->pidAt(row);
@@ -1071,17 +1069,13 @@ QVariantList AppEngine::systemdProcessesForSource(const QUrl& url) const {
 
   QSet<QString> active_processes;
   if (auto* source = model->source()) {
-    const auto snapshot = source->snapshot();
-    source->visitLineViews(0, static_cast<size_t>(snapshot.line_count),
-                           [&active_processes](const SourceLineView& line) {
-                             const auto name = QString::fromUtf8(
-                                 line.functionNameText().data(),
-                                 static_cast<qsizetype>(line.functionNameText().size())).trimmed();
-                             if (!name.isEmpty()) {
-                               active_processes.insert(name);
-                             }
-                             return true;
-                           });
+    const auto process_names = source->systemdProcessNames();
+    for (const auto& name : process_names) {
+      const auto trimmed = QString::fromStdString(name).trimmed();
+      if (!trimmed.isEmpty()) {
+        active_processes.insert(trimmed);
+      }
+    }
   } else {
     for (int row = 0; row < model->rowCount(); ++row) {
       const auto name = model->functionNameAt(row).trimmed();
