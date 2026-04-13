@@ -114,6 +114,25 @@ TEST(FileSourceTests, FollowingWatcherRefreshesOnAppend) {
   EXPECT_EQ(fetched.lines[1].text, "two");
 }
 
+TEST(FileSourceTests, FollowingEmptyFileDoesNotReportCatchingUp) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path =
+      writeFile(std::filesystem::path(dir.path().toStdString()) / "empty-follow.log", "");
+
+  FileSource source;
+  source.open(path.string());
+  source.setFollowing(true);
+  source.startIndexing();
+
+  const auto snapshot = source.snapshot();
+  EXPECT_TRUE(snapshot.following);
+  EXPECT_EQ(snapshot.file_size, 0U);
+  EXPECT_EQ(snapshot.line_count, 0U);
+  EXPECT_FALSE(snapshot.catching_up);
+  EXPECT_EQ(snapshot.state, SourceState::Ready);
+}
+
 TEST(FileSourceTests, RefreshCompletesPendingTailWithoutRescanningCommittedLines) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());

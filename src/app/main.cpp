@@ -13,6 +13,7 @@
 #include <optional>
 
 #include "AppEngine.h"
+#include "AppInfo.h"
 #include "UiSettings.h"
 #include "logging.h"
 #include "util.h"

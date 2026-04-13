@@ -578,11 +578,15 @@ void LogModel::setSource(std::unique_ptr<LogSource> source) {
             setActive(false);
             marked_rows_.clear();
             reset_pending_ = true;
-            beginCatchUp();
             if (row_count_cache_ != 0) {
               syncSourceRowCount(0, true);
             }
             refreshSourceMetrics();
+            if (source_) {
+              updateSourceStatus(source_->snapshot());
+            } else {
+              beginCatchUp();
+            }
           },
       .on_error =
           [this](std::string) {

@@ -1,6 +1,7 @@
 add_library(lgx_lib
   AdbCandidatesModel.cpp
   AdbDevicesModel.cpp
+  AppInfo.cpp
   logging.cpp
   util.cpp
   PageCache.cpp
@@ -18,6 +19,7 @@ add_library(lgx_lib
   UiSettings.cpp
   AdbCandidatesModel.h
   AdbDevicesModel.h
+  AppInfo.h
   util.h
   logging.h
   LogTypes.h

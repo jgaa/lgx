@@ -15,6 +15,25 @@
 namespace lgx {
 namespace {
 
+class TestLogSource final : public LogSource {
+ public:
+  void setSnapshot(SourceSnapshot snapshot) {
+    snapshot_ = snapshot;
+    setLines(static_cast<size_t>(snapshot.line_count));
+  }
+
+  [[nodiscard]] SourceSnapshot snapshot() const override {
+    return snapshot_;
+  }
+
+  void emitResetWithCurrentSnapshot(SourceResetReason reason) {
+    emitReset(reason);
+  }
+
+ private:
+  SourceSnapshot snapshot_{};
+};
+
 class ScopedTestSettings {
  public:
   ScopedTestSettings()
@@ -146,6 +165,30 @@ TEST(AppEngineTests, LogModelResetsOnSourceReset) {
   const auto index = model.index(0, 0);
   ASSERT_TRUE(index.isValid());
   EXPECT_EQ(model.data(index, LogModel::RawMessageRole).toString(), QStringLiteral("short"));
+}
+
+TEST(AppEngineTests, LogModelDoesNotForceCatchUpForFollowedEmptyReset) {
+  LogModel model(QUrl(QStringLiteral("file:///tmp/missing.log")));
+  auto source = std::make_unique<TestLogSource>();
+  auto* source_ptr = source.get();
+
+  source->setSnapshot(SourceSnapshot{
+      .state = SourceState::ResetDetected,
+      .line_count = 0,
+      .file_size = 0,
+      .following = true,
+      .catching_up = false,
+  });
+
+  model.setSource(std::move(source));
+
+  EXPECT_TRUE(model.following());
+  EXPECT_FALSE(model.catchingUp());
+
+  source_ptr->emitResetWithCurrentSnapshot(SourceResetReason::Disappeared);
+
+  EXPECT_TRUE(model.following());
+  EXPECT_FALSE(model.catchingUp());
 }
 
 TEST(AppEngineTests, PersistsRecentLogSourcesAndSessionRestore) {

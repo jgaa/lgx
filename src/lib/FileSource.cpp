@@ -231,16 +231,17 @@ void FileSource::setRequestedScannerName(std::string name) {
 }
 
 SourceSnapshot FileSource::snapshot() const {
+  const bool tailing_empty_source = following_ && file_size_ == 0;
   return SourceSnapshot{
       .state = state_,
       .line_count = lines_.size(),
       .indexed_size = scanned_size_,
       .file_size = fileSize(),
       .following = following_,
-      .catching_up = state_ == SourceState::Opening
+      .catching_up = !tailing_empty_source && (state_ == SourceState::Opening
           || state_ == SourceState::Indexing
           || state_ == SourceState::Updating
-          || state_ == SourceState::ResetDetected,
+          || state_ == SourceState::ResetDetected),
       .lines_per_second = linesPerSecond(),
   };
 }
