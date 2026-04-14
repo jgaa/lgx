@@ -40,7 +40,7 @@ struct AdbLogcatSpec {
 struct SystemdJournalSpec {
   QString instance_id;
   QString process_name;
-  bool start_at_now{false};
+  QString start_mode;
 };
 
 class IStreamProvider {
@@ -82,7 +82,7 @@ class StreamSource final : public LogSource {
                                              bool no_history = false);
   [[nodiscard]] static std::optional<AdbLogcatSpec> parseAdbLogcatSpec(const QUrl& url);
   [[nodiscard]] static QUrl makeSystemdJournalUrl(const QString& process_name = {},
-                                                  bool start_at_now = false);
+                                                  const QString& start_mode = {});
   [[nodiscard]] static std::optional<SystemdJournalSpec> parseSystemdJournalSpec(const QUrl& url);
 
   void setCallbacks(SourceCallbacks callbacks) override;

@@ -491,6 +491,20 @@ struct GenericLevelMatch {
   return parsed;
 }
 
+void extendParsedMessageToLineEnd(ParsedLineMetadata& parsed, size_t line_end) noexcept {
+  if (!parsed.message.valid() || line_end <= parsed.line_offset) {
+    return;
+  }
+
+  const auto message_start = static_cast<size_t>(parsed.line_offset) + parsed.message.start;
+  if (line_end <= message_start) {
+    parsed.message.length = 0;
+    return;
+  }
+
+  parsed.message.length = static_cast<uint32_t>(line_end - message_start);
+}
+
 [[nodiscard]] ParsedLineMetadata parseLogcatLine(std::string_view line,
                                                  uint32_t line_offset) noexcept {
   ParsedLineMetadata parsed;
@@ -947,6 +961,7 @@ class LogfaultScanner final : public LogFormatScanner {
         current = parseLogfaultLine(line, static_cast<uint32_t>(line_start));
       } else {
         current->line_length = static_cast<uint32_t>(line_end - current->line_offset);
+        extendParsedMessageToLineEnd(*current, line_end);
       }
       line_start = index + 1U;
     }
@@ -964,6 +979,7 @@ class LogfaultScanner final : public LogFormatScanner {
         current = parseLogfaultLine(line, static_cast<uint32_t>(line_start));
       } else {
         current->line_length = static_cast<uint32_t>(line_end - current->line_offset);
+        extendParsedMessageToLineEnd(*current, line_end);
       }
     }
 
@@ -1186,6 +1202,7 @@ class GenericScanner final : public LogFormatScanner {
         current = parseGenericLine(line, static_cast<uint32_t>(line_start));
       } else {
         current->line_length = static_cast<uint32_t>(line_end - current->line_offset);
+        extendParsedMessageToLineEnd(*current, line_end);
       }
       line_start = index + 1U;
     }
@@ -1203,6 +1220,7 @@ class GenericScanner final : public LogFormatScanner {
         current = parseGenericLine(line, static_cast<uint32_t>(line_start));
       } else {
         current->line_length = static_cast<uint32_t>(line_end - current->line_offset);
+        extendParsedMessageToLineEnd(*current, line_end);
       }
     }
 

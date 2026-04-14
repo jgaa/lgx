@@ -592,15 +592,16 @@ int AppEngine::openAdbLogcatStream(const QString& serial, const QString& name, b
   return index;
 }
 
-int AppEngine::openSystemdJournalStream(const QString& process_name, bool start_at_now) {
+int AppEngine::openSystemdJournalStream(const QString& process_name, const QString& start_mode) {
   LOG_INFO << "Request to open systemd journal stream for process='"
-           << process_name.trimmed().toStdString() << "' start_at_now=" << start_at_now;
+           << process_name.trimmed().toStdString() << "' start_mode='"
+           << start_mode.trimmed().toStdString() << "'";
   if (!systemdAvailable()) {
     LOG_WARN << "Rejecting systemd journal open request because support is disabled";
     return -1;
   }
 
-  const auto url = StreamSource::makeSystemdJournalUrl(process_name.trimmed(), start_at_now);
+  const auto url = StreamSource::makeSystemdJournalUrl(process_name.trimmed(), start_mode.trimmed());
   LOG_INFO << "Created systemd journal URL: " << url.toString().toStdString();
   const auto index = openLogSourceInternal(url, false);
   LOG_INFO << "Systemd journal open result index=" << index;
@@ -1398,14 +1399,29 @@ QString AppEngine::titleForUrl(const QUrl& url) {
         : QObject::tr("Logcat: %1").arg(label);
   }
   if (const auto systemd_spec = StreamSource::parseSystemdJournalSpec(url); systemd_spec.has_value()) {
+    const auto start_mode = systemd_spec->start_mode;
     if (systemd_spec->process_name.isEmpty()) {
-      return systemd_spec->start_at_now
-          ? QObject::tr("Systemd journal (from now)")
-          : QObject::tr("Systemd journal");
+      if (start_mode == QStringLiteral("now")) {
+        return QObject::tr("Systemd journal (from now)");
+      }
+      if (start_mode == QStringLiteral("today")) {
+        return QObject::tr("Systemd journal (from today)");
+      }
+      if (start_mode == QStringLiteral("7d")) {
+        return QObject::tr("Systemd journal (last 7 days)");
+      }
+      return QObject::tr("Systemd journal");
     }
-    return systemd_spec->start_at_now
-        ? QObject::tr("Systemd: %1 (from now)").arg(systemd_spec->process_name)
-        : QObject::tr("Systemd: %1").arg(systemd_spec->process_name);
+    if (start_mode == QStringLiteral("now")) {
+      return QObject::tr("Systemd: %1 (from now)").arg(systemd_spec->process_name);
+    }
+    if (start_mode == QStringLiteral("today")) {
+      return QObject::tr("Systemd: %1 (from today)").arg(systemd_spec->process_name);
+    }
+    if (start_mode == QStringLiteral("7d")) {
+      return QObject::tr("Systemd: %1 (last 7 days)").arg(systemd_spec->process_name);
+    }
+    return QObject::tr("Systemd: %1").arg(systemd_spec->process_name);
   }
 
   if (url.isLocalFile()) {
@@ -1451,14 +1467,30 @@ QString AppEngine::displaySourceForUrl(const QUrl& url) {
         : QObject::tr("ADB logcat %1 (%2)").arg(label, adb_spec->serial);
   }
   if (const auto systemd_spec = StreamSource::parseSystemdJournalSpec(url); systemd_spec.has_value()) {
+    const auto start_mode = systemd_spec->start_mode;
     if (systemd_spec->process_name.isEmpty()) {
-      return systemd_spec->start_at_now
-          ? QObject::tr("Systemd journal starting now")
-          : QObject::tr("Systemd journal");
+      if (start_mode == QStringLiteral("now")) {
+        return QObject::tr("Systemd journal starting now");
+      }
+      if (start_mode == QStringLiteral("today")) {
+        return QObject::tr("Systemd journal from today");
+      }
+      if (start_mode == QStringLiteral("7d")) {
+        return QObject::tr("Systemd journal from the last 7 days");
+      }
+      return QObject::tr("Systemd journal");
     }
-    return systemd_spec->start_at_now
-        ? QObject::tr("Systemd journal starting now filtered by %1").arg(systemd_spec->process_name)
-        : QObject::tr("Systemd journal filtered by %1").arg(systemd_spec->process_name);
+    if (start_mode == QStringLiteral("now")) {
+      return QObject::tr("Systemd journal starting now filtered by %1").arg(systemd_spec->process_name);
+    }
+    if (start_mode == QStringLiteral("today")) {
+      return QObject::tr("Systemd journal from today filtered by %1").arg(systemd_spec->process_name);
+    }
+    if (start_mode == QStringLiteral("7d")) {
+      return QObject::tr("Systemd journal from the last 7 days filtered by %1")
+          .arg(systemd_spec->process_name);
+    }
+    return QObject::tr("Systemd journal filtered by %1").arg(systemd_spec->process_name);
   }
 
   if (url.isLocalFile()) {

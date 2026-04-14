@@ -115,7 +115,7 @@ class AppEngine : public QObject {
   Q_INVOKABLE int openAdbLogcatStream(const QString& serial, const QString& name = {},
                                       bool no_history = false);
   Q_INVOKABLE int openSystemdJournalStream(const QString& process_name = {},
-                                           bool start_at_now = false);
+                                           const QString& start_mode = {});
   Q_INVOKABLE int scanAdbExecutables();
   Q_INVOKABLE bool refreshAdbDevices();
   Q_INVOKABLE bool refreshDockerContainers();

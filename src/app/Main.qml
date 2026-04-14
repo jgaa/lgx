@@ -469,7 +469,7 @@ ApplicationWindow {
                 MenuItem {
                     text: qsTr("Open Journal")
                     onTriggered: {
-                        const openedIndex = AppEngine.openSystemdJournalStream("")
+                        const openedIndex = AppEngine.openSystemdJournalStream("", "")
                         if (openedIndex >= 0) {
                             window.setCurrentTabIndex(openedIndex)
                         }
@@ -478,7 +478,25 @@ ApplicationWindow {
                 MenuItem {
                     text: qsTr("Open Journal starting now")
                     onTriggered: {
-                        const openedIndex = AppEngine.openSystemdJournalStream("", true)
+                        const openedIndex = AppEngine.openSystemdJournalStream("", "now")
+                        if (openedIndex >= 0) {
+                            window.setCurrentTabIndex(openedIndex)
+                        }
+                    }
+                }
+                MenuItem {
+                    text: qsTr("Open Journal from today")
+                    onTriggered: {
+                        const openedIndex = AppEngine.openSystemdJournalStream("", "today")
+                        if (openedIndex >= 0) {
+                            window.setCurrentTabIndex(openedIndex)
+                        }
+                    }
+                }
+                MenuItem {
+                    text: qsTr("Open Journal from last 7 days")
+                    onTriggered: {
+                        const openedIndex = AppEngine.openSystemdJournalStream("", "7d")
                         if (openedIndex >= 0) {
                             window.setCurrentTabIndex(openedIndex)
                         }

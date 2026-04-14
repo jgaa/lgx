@@ -324,6 +324,8 @@ TEST(FileSourceTests, LogfaultScannerMergesMultilineEventsDuringIndexing) {
   EXPECT_EQ(rows[0].log_level, LogLevel_Trace);
   EXPECT_NE(rows[0].raw_text.find("VALUES (?, ?, ?, ?)"), std::string::npos);
   EXPECT_NE(rows[0].raw_text.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
+  EXPECT_NE(rows[0].message.find("VALUES (?, ?, ?, ?)"), std::string::npos);
+  EXPECT_NE(rows[0].message.find("last_update = CURRENT_TIMESTAMP"), std::string::npos);
   EXPECT_NE(rows[1].raw_text.find("| args: a, b, 1, 0"), std::string::npos);
 }
 
@@ -419,6 +421,8 @@ TEST(FileSourceTests, GenericScannerTreatsIndentedLinesAsContinuations) {
   EXPECT_EQ(rows[0].log_level, LogLevel_Info);
   EXPECT_NE(rows[0].raw_text.find("stack trace line 1"), std::string::npos);
   EXPECT_NE(rows[0].raw_text.find("stack trace line 2"), std::string::npos);
+  EXPECT_NE(rows[0].message.find("stack trace line 1"), std::string::npos);
+  EXPECT_NE(rows[0].message.find("stack trace line 2"), std::string::npos);
   EXPECT_EQ(rows[1].raw_text, "2026-04-01 18:49:13.004 INFO done");
 }
 

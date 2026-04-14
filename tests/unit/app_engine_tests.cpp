@@ -454,12 +454,20 @@ TEST(AppEngineTests, SourceBackedLogfaultRowsDoNotExposeProcessInfo) {
   engine.releaseLogModel(url);
 }
 
-TEST(AppEngineTests, SystemdJournalUrlPreservesStartAtNowMode) {
-  const auto url = StreamSource::makeSystemdJournalUrl(QStringLiteral("glogg"), true);
+TEST(AppEngineTests, SystemdJournalUrlPreservesStartMode) {
+  const auto url = StreamSource::makeSystemdJournalUrl(QStringLiteral("glogg"), QStringLiteral("now"));
   const auto spec = StreamSource::parseSystemdJournalSpec(url);
   ASSERT_TRUE(spec.has_value());
   EXPECT_EQ(spec->process_name, QStringLiteral("glogg"));
-  EXPECT_TRUE(spec->start_at_now);
+  EXPECT_EQ(spec->start_mode, QStringLiteral("now"));
+}
+
+TEST(AppEngineTests, SystemdJournalDisplayTextReflectsRelativeRanges) {
+  AppEngine engine;
+  EXPECT_EQ(engine.displaySourceTextForUrl(StreamSource::makeSystemdJournalUrl({}, QStringLiteral("today"))),
+            QStringLiteral("Systemd journal from today"));
+  EXPECT_EQ(engine.displaySourceTextForUrl(StreamSource::makeSystemdJournalUrl({}, QStringLiteral("7d"))),
+            QStringLiteral("Systemd journal from the last 7 days"));
 }
 
 TEST(AppEngineTests, DockerUrlPreservesNoHistoryMode) {

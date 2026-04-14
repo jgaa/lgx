@@ -310,9 +310,9 @@ class AdbLogcatProvider final : public IStreamProvider {
 #ifdef LGX_ENABLE_SYSTEMD_SOURCE
 class SystemdJournalProvider final : public IStreamProvider {
  public:
-  explicit SystemdJournalProvider(QString process_name, bool start_at_now)
+  explicit SystemdJournalProvider(QString process_name, QString start_mode)
       : process_name_(std::move(process_name)),
-        start_at_now_(start_at_now) {
+        start_mode_(std::move(start_mode)) {
     drain_timer_.setSingleShot(true);
     QObject::connect(&drain_timer_, &QTimer::timeout, &drain_timer_, [this]() {
       drainAvailableEntries();
@@ -355,11 +355,24 @@ class SystemdJournalProvider final : public IStreamProvider {
       sd_journal_add_match(journal_, ident_match.constData(), 0);
     }
 
-    const int seek_result = start_at_now_
-        ? sd_journal_seek_realtime_usec(journal_,
+    int seek_result = sd_journal_seek_head(journal_);
+    if (start_mode_ == QStringLiteral("now")) {
+      seek_result =
+          sd_journal_seek_realtime_usec(journal_,
                                         static_cast<uint64_t>(QDateTime::currentMSecsSinceEpoch())
-                                            * 1000U)
-        : sd_journal_seek_head(journal_);
+                                            * 1000U);
+    } else if (start_mode_ == QStringLiteral("today")) {
+      const auto now = QDateTime::currentDateTime();
+      const auto midnight = QDateTime(now.date(), QTime(0, 0), now.timeZone());
+      seek_result = sd_journal_seek_realtime_usec(
+          journal_, static_cast<uint64_t>(midnight.toMSecsSinceEpoch()) * 1000U);
+    } else if (start_mode_ == QStringLiteral("7d")) {
+      seek_result =
+          sd_journal_seek_realtime_usec(journal_,
+                                        static_cast<uint64_t>(
+                                            QDateTime::currentDateTime().addDays(-7).toMSecsSinceEpoch())
+                                            * 1000U);
+    }
     if (seek_result < 0) {
       if (callbacks_.on_error) {
         callbacks_.on_error(QObject::tr("Failed to seek the systemd journal."));
@@ -556,7 +569,7 @@ class SystemdJournalProvider final : public IStreamProvider {
   Callbacks callbacks_;
   sd_journal* journal_{nullptr};
   QString process_name_;
-  bool start_at_now_{false};
+  QString start_mode_;
   mutable QHash<uint32_t, QByteArray> process_name_cache_;
 };
 #endif
@@ -700,19 +713,20 @@ std::optional<AdbLogcatSpec> StreamSource::parseAdbLogcatSpec(const QUrl& url) {
   return spec;
 }
 
-QUrl StreamSource::makeSystemdJournalUrl(const QString& process_name, bool start_at_now) {
+QUrl StreamSource::makeSystemdJournalUrl(const QString& process_name, const QString& start_mode) {
   QUrl url;
   url.setScheme(QLatin1StringView{kSystemdScheme});
   url.setPath(QStringLiteral("/") + QUuid::createUuid().toString(QUuid::WithoutBraces));
 
   const auto trimmed = process_name.trimmed();
-  if (!trimmed.isEmpty() || start_at_now) {
+  const auto mode = start_mode.trimmed();
+  if (!trimmed.isEmpty() || !mode.isEmpty()) {
     QUrlQuery query;
     if (!trimmed.isEmpty()) {
       query.addQueryItem(QStringLiteral("process"), trimmed);
     }
-    if (start_at_now) {
-      query.addQueryItem(QStringLiteral("start"), QStringLiteral("now"));
+    if (!mode.isEmpty()) {
+      query.addQueryItem(QStringLiteral("start"), mode);
     }
     url.setQuery(query);
   }
@@ -731,7 +745,7 @@ std::optional<SystemdJournalSpec> StreamSource::parseSystemdJournalSpec(const QU
     spec.instance_id.remove(0, 1);
   }
   spec.process_name = query.queryItemValue(QStringLiteral("process")).trimmed();
-  spec.start_at_now = query.queryItemValue(QStringLiteral("start")) == QStringLiteral("now");
+  spec.start_mode = query.queryItemValue(QStringLiteral("start")).trimmed();
   return spec;
 }
 
@@ -945,7 +959,7 @@ std::unique_ptr<IStreamProvider> StreamSource::createProvider(const QUrl& url) {
 #ifdef LGX_ENABLE_SYSTEMD_SOURCE
     LOG_INFO << "Using systemd journal provider";
     return std::make_unique<SystemdJournalProvider>(systemd_spec->process_name,
-                                                    systemd_spec->start_at_now);
+                                                    systemd_spec->start_mode);
 #else
     LOG_WARN << "Systemd journal provider requested but LGX_ENABLE_SYSTEMD_SOURCE is disabled";
     return {};
@@ -1067,7 +1081,7 @@ bool StreamSource::sourceStartsLive(const QUrl& url) const {
   }
 
   if (const auto systemd = parseSystemdJournalSpec(url); systemd.has_value()) {
-    return systemd->start_at_now;
+    return systemd->start_mode == QStringLiteral("now");
   }
 
   return false;
