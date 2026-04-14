@@ -676,6 +676,7 @@ Item {
                 required property string message
                 required property string rawMessage
                 required property string processName
+                required property string threadId
                 required property int pid
                 required property int lineNo
                 required property int logLevel
@@ -689,6 +690,9 @@ Item {
                     && root.rowModel.scannerName !== "None"
                 readonly property bool showProcessBanner: !!root.rowModel
                     && (root.rowModel.scannerName === "Logcat" || root.rowModel.scannerName === "Systemd")
+                readonly property bool showThreadId: !!root.rowModel
+                    && root.rowModel.scannerName === "Logfault"
+                    && threadId.trim().length > 0
                 readonly property string processBannerText: {
                     if (!showProcessBanner) {
                         return ""
@@ -827,6 +831,16 @@ Item {
                         }
 
                         Label {
+                            id: threadIdLabel
+                            visible: rowDelegate.showThreadId
+                            text: threadId
+                            color: Qt.darker(root.levelForegroundColor(logLevel), 1.05)
+                            font.family: UiSettings.logFontFamily
+                            font.pixelSize: rowFontPixelSize
+                            renderType: Text.NativeRendering
+                        }
+
+                        Label {
                             id: messageLabel
                             text: message.length > 0 ? message : rawMessage
                             width: root.wrapLogLines
@@ -835,9 +849,11 @@ Item {
                                               - (levelBadge.visible ? levelBadge.implicitWidth : 0)
                                               - (processLabel.visible ? processLabel.implicitWidth : 0)
                                               - (timestampLabel.visible ? timestampLabel.implicitWidth : 0)
+                                              - (threadIdLabel.visible ? threadIdLabel.implicitWidth : 0)
                                               - (contentRow.spacing * ((levelBadge.visible ? 1 : 0)
                                                                        + (processLabel.visible ? 1 : 0)
                                                                        + (timestampLabel.visible ? 1 : 0)
+                                                                       + (threadIdLabel.visible ? 1 : 0)
                                                                        + 1))
                                               - 12)
                                 : implicitWidth

@@ -240,6 +240,60 @@ TEST(FileSourceTests, RefreshDetectsTruncation) {
   EXPECT_EQ(rows[0].raw_text, "short");
 }
 
+TEST(FileSourceTests, WindowReadRecoversWhenFileShrinksBeforeExplicitRefresh) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(std::filesystem::path(dir.path().toStdString()) / "truncate-race.log",
+                              "alpha\nbeta\n");
+
+  FileSource source;
+  source.open(path.string());
+  source.startIndexing();
+
+  writeFile(path, "short\n");
+
+  const auto stale_rows = readWindowRows(source, 0, 1);
+  EXPECT_TRUE(stale_rows.empty());
+  EXPECT_EQ(source.snapshot().line_count, 1U);
+
+  const auto rows = readWindowRows(source, 0, 1);
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows[0].raw_text, "short");
+}
+
+TEST(FileSourceTests, RefreshReindexesWhenFileIsRewrittenInPlaceBeforeObservation) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = writeFile(std::filesystem::path(dir.path().toStdString()) / "rewrite-in-place.log",
+                              "old line 1\nold line 2\n");
+
+  FileSource source;
+  SourceResetReason reset_reason = SourceResetReason::Disappeared;
+  source.setCallbacks(SourceCallbacks{
+      .on_reset =
+          [&reset_reason](SourceResetReason reason) {
+            reset_reason = reason;
+          },
+  });
+
+  source.open(path.string());
+  source.startIndexing();
+
+  writeFile(path,
+            "2026-04-14 15:03:46.060 EEST TRACE 52151 {int main(int, char**)} Getting ready...\n"
+            "2026-04-14 15:03:46.060 EEST INFO 52151 nextappd 0.20.0 starting up.\n"
+            "2026-04-14 15:03:46.062 EEST DEBUG 52155 {void nextapp::Server::runIoThread(size_t)} starting io-thread 1\n");
+  source.refresh();
+
+  EXPECT_EQ(reset_reason, SourceResetReason::Recreated);
+
+  const auto rows = readWindowRows(source, 0, 3);
+  ASSERT_EQ(rows.size(), 3U);
+  EXPECT_NE(rows[0].raw_text.find("Getting ready"), std::string::npos);
+  EXPECT_NE(rows[1].raw_text.find("starting up"), std::string::npos);
+  EXPECT_NE(rows[2].raw_text.find("starting io-thread 1"), std::string::npos);
+}
+
 TEST(FileSourceTests, RefreshDetectsRecreatedFileIdentity) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());

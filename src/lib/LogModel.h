@@ -26,6 +26,7 @@ class LogModel final : public QAbstractListModel {
   Q_OBJECT
   Q_PROPERTY(State state READ state NOTIFY stateChanged)
   Q_PROPERTY(QUrl sourceUrl READ sourceUrl CONSTANT)
+  Q_PROPERTY(bool isFileSource READ isFileSource CONSTANT)
   Q_PROPERTY(int lineCount READ rowCount NOTIFY lineCountChanged)
   Q_PROPERTY(bool following READ following WRITE setFollowing NOTIFY followingChanged)
   Q_PROPERTY(bool active READ active NOTIFY activeChanged)
@@ -90,10 +91,12 @@ class LogModel final : public QAbstractListModel {
   Q_INVOKABLE bool toggleMarkAt(int row, int preferredColor = static_cast<int>(LineMark_Default));
   Q_INVOKABLE void setFollowing(bool enabled);
   Q_INVOKABLE void toggleFollowing();
+  Q_INVOKABLE void refreshFileSource();
   Q_INVOKABLE void setRequestedScannerName(const QString& name);
 
   [[nodiscard]] State state() const noexcept;
   [[nodiscard]] const QUrl& sourceUrl() const noexcept;
+  [[nodiscard]] bool isFileSource() const noexcept;
   [[nodiscard]] LogSource* source() const noexcept;
   [[nodiscard]] bool following() const noexcept;
   [[nodiscard]] bool active() const noexcept;

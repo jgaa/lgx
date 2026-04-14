@@ -36,6 +36,7 @@ ApplicationWindow {
     readonly property bool activeHasSelection: activeView ? activeView.hasSelection : false
     readonly property string activeSelectedText: activeView ? activeView.selectedText : ""
     readonly property bool activeFollowing: !!activeCurrentLogModel && activeCurrentLogModel.following
+    readonly property bool activeIsFileSource: !!activeCurrentLogModel && activeCurrentLogModel.isFileSource
     readonly property bool activeWrapLogLines: activeLogView ? activeLogView.wrapLogLines : false
     readonly property var zoomMenuValues: [50, 75, 90, 100, 110, 125, 150, 175, 200]
     readonly property var windowSizePresets: [
@@ -105,6 +106,12 @@ ApplicationWindow {
     function toggleActiveWrapLogLines() {
         if (activeLogView) {
             activeLogView.toggleWrapLogLines()
+        }
+    }
+
+    function refreshActiveFileSource() {
+        if (activeCurrentLogModel && activeIsFileSource) {
+            activeCurrentLogModel.refreshFileSource()
         }
     }
 
@@ -723,6 +730,15 @@ ApplicationWindow {
                 ToolTip.visible: hovered
                 ToolTip.text: checked ? qsTr("Disable line wrapping") : qsTr("Wrap long lines")
                 onClicked: window.toggleActiveWrapLogLines()
+            }
+
+            LgxQml.SymbolToolButton {
+                enabled: window.activeIsFileSource
+                symbol: "refresh"
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Refresh file")
+                accessibleName: ToolTip.text
+                onClicked: window.refreshActiveFileSource()
             }
 
             Frame {
@@ -1480,6 +1496,12 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Shortcut {
+        sequence: "F5"
+        enabled: window.activeIsFileSource
+        onActivated: window.refreshActiveFileSource()
     }
 
     Shortcut {

@@ -162,6 +162,8 @@ void FileSource::refresh() {
 
     const auto identity_changed = !has_identity_ || !(info.identity == file_identity_);
     const auto size_shrank = has_identity_ && info.size < scanned_size_;
+    const auto content_replaced =
+        !identity_changed && !size_shrank && scanned_size_ > 0 && !matchesIndexedSamples(info.size);
     file_identity_ = info.identity;
     has_identity_ = true;
     file_size_ = info.size;
@@ -173,6 +175,11 @@ void FileSource::refresh() {
 
     if (size_shrank) {
       resetAndReindex(SourceResetReason::Truncated);
+      return;
+    }
+
+    if (content_replaced) {
+      resetAndReindex(SourceResetReason::Recreated);
       return;
     }
 
@@ -284,42 +291,47 @@ std::shared_ptr<const SourceWindow> FileSource::windowForSourceRange(uint64_t fi
     return window;
   }
 
-  if (!raw) {
+  try {
+    if (!raw) {
+      for (size_t page_index = *first_page; page_index <= *last_page; ++page_index) {
+        ensurePageDeepParsed(page_index);
+      }
+    }
+
+    window->first_source_row_ = pageMetadata()[*first_page].firstLine();
+    const auto& last_page_meta = pageMetadata()[*last_page];
+    window->last_source_row_ = last_page_meta.firstLine() + last_page_meta.lines();
+    window->pages_.reserve(*last_page - *first_page + 1U);
+    window->lines_.reserve(window->last_source_row_ - window->first_source_row_);
+
     for (size_t page_index = *first_page; page_index <= *last_page; ++page_index) {
-      ensurePageDeepParsed(page_index);
+      const auto page_slot = static_cast<uint32_t>(window->pages_.size());
+      const auto page = pageSnapshot(page_index);
+      window->pages_.push_back(page);
+
+      const auto& page_meta = pageMetadata()[page_index];
+      const auto first_page_line = page_meta.firstLine();
+      const auto line_count = page_meta.lines();
+      for (size_t offset = 0; offset < line_count; ++offset) {
+        const auto source_index = first_page_line + offset;
+        const auto& line = page_meta.indexedLine(offset);
+        window->lines_.push_back(SourceWindowLine{
+            .source_row = static_cast<uint64_t>(source_index),
+            .log_level = line.log_level,
+            .pid = line.pid,
+            .tid = line.tid,
+            .function_name = line.function_name,
+            .message = line.message,
+            .thread_id = line.thread_id,
+            .timestamp_msecs_since_epoch = line.timestamp_msecs_since_epoch,
+            .page_slot = page_slot,
+            .line_index_in_page = static_cast<uint32_t>(offset),
+        });
+      }
     }
-  }
-
-  window->first_source_row_ = pageMetadata()[*first_page].firstLine();
-  const auto& last_page_meta = pageMetadata()[*last_page];
-  window->last_source_row_ = last_page_meta.firstLine() + last_page_meta.lines();
-  window->pages_.reserve(*last_page - *first_page + 1U);
-  window->lines_.reserve(window->last_source_row_ - window->first_source_row_);
-
-  for (size_t page_index = *first_page; page_index <= *last_page; ++page_index) {
-    const auto page_slot = static_cast<uint32_t>(window->pages_.size());
-    const auto page = pageSnapshot(page_index);
-    window->pages_.push_back(page);
-
-    const auto& page_meta = pageMetadata()[page_index];
-    const auto first_page_line = page_meta.firstLine();
-    const auto line_count = page_meta.lines();
-    for (size_t offset = 0; offset < line_count; ++offset) {
-      const auto source_index = first_page_line + offset;
-      const auto& line = page_meta.indexedLine(offset);
-      window->lines_.push_back(SourceWindowLine{
-          .source_row = static_cast<uint64_t>(source_index),
-          .log_level = line.log_level,
-          .pid = line.pid,
-          .tid = line.tid,
-          .function_name = line.function_name,
-          .message = line.message,
-          .thread_id = line.thread_id,
-          .timestamp_msecs_since_epoch = line.timestamp_msecs_since_epoch,
-          .page_slot = page_slot,
-          .line_index_in_page = static_cast<uint32_t>(offset),
-      });
-    }
+  } catch (const std::exception&) {
+    refresh();
+    return std::make_shared<SourceWindow>();
   }
 
   return window;
@@ -454,6 +466,7 @@ void FileSource::rebuildIndex() {
   has_identity_ = true;
   scanAppendedBytes(0);
   indexed_size_ = scanned_size_;
+  updateIndexedSamples();
   setLines(pageMetadata().empty() ? 0 : pageMetadata().back().firstLine() + pageMetadata().back().lines());
 }
 
@@ -476,6 +489,73 @@ void FileSource::resetAndReindex(SourceResetReason reason) {
   if (!path_.empty()) {
     startWatching();
   }
+}
+
+bool FileSource::matchesIndexedSamples(uint64_t current_size) const {
+  if (path_.empty() || scanned_size_ == 0 || current_size < scanned_size_) {
+    return false;
+  }
+
+  std::ifstream input(path_, std::ios::binary);
+  if (!input) {
+    return false;
+  }
+
+  if (!indexed_prefix_sample_.empty()) {
+    std::string prefix(indexed_prefix_sample_.size(), '\0');
+    input.seekg(0, std::ios::beg);
+    input.read(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+    if (static_cast<size_t>(input.gcount()) != prefix.size() || prefix != indexed_prefix_sample_) {
+      return false;
+    }
+  }
+
+  if (!indexed_tail_sample_.empty()) {
+    const auto tail_offset = static_cast<std::streamoff>(scanned_size_ - indexed_tail_sample_.size());
+    std::string tail(indexed_tail_sample_.size(), '\0');
+    input.clear();
+    input.seekg(tail_offset, std::ios::beg);
+    if (!input) {
+      return false;
+    }
+    input.read(tail.data(), static_cast<std::streamsize>(tail.size()));
+    if (static_cast<size_t>(input.gcount()) != tail.size() || tail != indexed_tail_sample_) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void FileSource::updateIndexedSamples() {
+  indexed_prefix_sample_.clear();
+  indexed_tail_sample_.clear();
+
+  if (path_.empty() || scanned_size_ == 0) {
+    return;
+  }
+
+  std::ifstream input(path_, std::ios::binary);
+  if (!input) {
+    return;
+  }
+
+  const auto prefix_bytes = static_cast<size_t>(std::min<uint64_t>(scanned_size_, kConsistencySampleBytes));
+  indexed_prefix_sample_.resize(prefix_bytes);
+  input.seekg(0, std::ios::beg);
+  input.read(indexed_prefix_sample_.data(), static_cast<std::streamsize>(prefix_bytes));
+  indexed_prefix_sample_.resize(static_cast<size_t>(input.gcount()));
+
+  const auto tail_bytes = static_cast<size_t>(std::min<uint64_t>(scanned_size_, kConsistencySampleBytes));
+  indexed_tail_sample_.resize(tail_bytes);
+  input.clear();
+  input.seekg(static_cast<std::streamoff>(scanned_size_ - tail_bytes), std::ios::beg);
+  if (!input) {
+    indexed_tail_sample_.clear();
+    return;
+  }
+  input.read(indexed_tail_sample_.data(), static_cast<std::streamsize>(tail_bytes));
+  indexed_tail_sample_.resize(static_cast<size_t>(input.gcount()));
 }
 
 size_t FileSource::scanAppendedBytes(uint64_t start_offset) {
@@ -570,11 +650,14 @@ size_t FileSource::scanAppendedBytes(uint64_t start_offset) {
   const auto total_lines =
       pageMetadata().empty() ? 0 : pageMetadata().back().firstLine() + pageMetadata().back().lines();
   setLines(total_lines);
+  updateIndexedSamples();
   return total_lines - old_line_count;
 }
 
 void FileSource::clearIndexedState() {
   setLines(0);
+  indexed_prefix_sample_.clear();
+  indexed_tail_sample_.clear();
   line_anchors_.clear();
   logcat_pids_.clear();
   systemd_process_names_.clear();

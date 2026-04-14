@@ -389,6 +389,16 @@ void LogModel::toggleFollowing() {
   setFollowing(!following_);
 }
 
+void LogModel::refreshFileSource() {
+  if (!source_ || !source_url_.isLocalFile()) {
+    return;
+  }
+
+  beginCatchUp();
+  source_->refresh();
+  refreshSourceMetrics();
+}
+
 void LogModel::setRequestedScannerName(const QString& name) {
   if (!source_) {
     return;
@@ -463,6 +473,10 @@ LogModel::State LogModel::state() const noexcept {
 
 const QUrl& LogModel::sourceUrl() const noexcept {
   return source_url_;
+}
+
+bool LogModel::isFileSource() const noexcept {
+  return source_url_.isLocalFile();
 }
 
 LogSource* LogModel::source() const noexcept {

@@ -68,6 +68,8 @@ class FileSource final : public LogSource {
   };
 
   [[nodiscard]] static FileInfo statPath(const std::string& path);
+  [[nodiscard]] bool matchesIndexedSamples(uint64_t current_size) const;
+  void updateIndexedSamples();
   void fail(std::string message);
   void setState(SourceState state);
   void rebuildIndex();
@@ -93,6 +95,7 @@ class FileSource final : public LogSource {
   static constexpr size_t kReadBufferSize = 256 * 1024;
   static constexpr size_t kTargetPageBytes = 64 * 1024;
   static constexpr size_t kLineAnchorStride = 10'000;
+  static constexpr size_t kConsistencySampleBytes = 256;
 
   std::filesystem::path path_;
   SourceState state_{SourceState::Idle};
@@ -102,6 +105,8 @@ class FileSource final : public LogSource {
   uint64_t file_size_{0};
   bool has_identity_{false};
   FileIdentity file_identity_{};
+  std::string indexed_prefix_sample_;
+  std::string indexed_tail_sample_;
   std::vector<LineAnchor> line_anchors_;
   std::string pending_line_bytes_;
   std::optional<uint64_t> pending_line_offset_;

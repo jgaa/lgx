@@ -114,6 +114,7 @@ TEST(AppEngineTests, LogModelExposesRequestedRoles) {
   EXPECT_EQ(model.data(index, LogModel::DateRole).toDateTime(), row.date);
   EXPECT_EQ(model.data(index, LogModel::TagsRole).toStringList(), row.tags);
   EXPECT_EQ(model.data(index, LogModel::ThreadIdRole).toString(), QStringLiteral("thread-1"));
+  EXPECT_TRUE(model.isFileSource());
 
   const auto roles = model.roleNames();
   EXPECT_EQ(roles.value(LogModel::LineNoRole), QByteArray("lineNo"));
@@ -430,6 +431,34 @@ TEST(AppEngineTests, SourceBackedSystemdRowsKeepMessageAndExposeProcessInfo) {
   engine.releaseLogModel(url);
 }
 
+TEST(AppEngineTests, FileBackedModelRefreshesOnDemand) {
+  ScopedTestSettings scoped_settings;
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const auto path = dir.filePath(QStringLiteral("refreshable.log"));
+  QFile file(path);
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("first\n"), 0);
+  file.close();
+
+  AppEngine engine;
+  const auto url = QUrl::fromLocalFile(path);
+  auto* model = qobject_cast<LogModel*>(engine.createLogModel(url));
+  ASSERT_NE(model, nullptr);
+  ASSERT_EQ(model->rowCount(), 1);
+  EXPECT_EQ(model->plainTextAt(0), QStringLiteral("first"));
+
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  ASSERT_GT(file.write("first\nsecond\n"), 0);
+  file.close();
+
+  model->refreshFileSource();
+
+  ASSERT_EQ(model->rowCount(), 2);
+  EXPECT_EQ(model->plainTextAt(1), QStringLiteral("second"));
+  engine.releaseLogModel(url);
+}
+
 TEST(AppEngineTests, SourceBackedLogfaultRowsDoNotExposeProcessInfo) {
   ScopedTestSettings scoped_settings;
   QTemporaryDir dir;
@@ -450,6 +479,7 @@ TEST(AppEngineTests, SourceBackedLogfaultRowsDoNotExposeProcessInfo) {
   ASSERT_TRUE(index.isValid());
   EXPECT_EQ(model->data(index, LogModel::MessageRole).toString(), QStringLiteral("hello"));
   EXPECT_EQ(model->data(index, LogModel::ProcessNameRole).toString(), QString{});
+  EXPECT_EQ(model->data(index, LogModel::ThreadIdRole).toString(), QStringLiteral("42"));
   EXPECT_EQ(model->plainTextAt(0), QStringLiteral("hello"));
   engine.releaseLogModel(url);
 }
