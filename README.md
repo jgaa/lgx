@@ -247,7 +247,7 @@ Add the KDE Flatpak repository (provides the Qt 6 runtime):
 
 ```sh
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install flathub org.kde.Platform//6.8 org.kde.Sdk//6.8
+flatpak install flathub org.kde.Platform//6.9 org.kde.Sdk//6.9
 ```
 
 ### Build locally
