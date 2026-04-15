@@ -1012,7 +1012,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: AppInfo ? AppInfo.description : ""
+                    text: AppInfo ? AppInfo.tagline : ""
                     font.pixelSize: 18
                 }
 

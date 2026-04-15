@@ -27,7 +27,7 @@ AppInfo::AppInfo(QObject *parent)
     : QObject(parent) {}
 
 QString AppInfo::tagline() const {
-  return tr("lgx is a high-performance log explorer for developers and DevOps, designed to handle large files with fast indexing, smart filtering, and clear visual insights.");
+  return tr("lgx is a log viewer for developers and DevOps");
 }
 
 QString AppInfo::description() const

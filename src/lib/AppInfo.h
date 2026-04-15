@@ -7,6 +7,7 @@ namespace lgx {
 
 class AppInfo final : public QObject {
   Q_OBJECT
+  Q_PROPERTY(QString tagline READ tagline CONSTANT)
   Q_PROPERTY(QString description READ description CONSTANT)
   Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
   Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
