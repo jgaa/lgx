@@ -1,0 +1,90 @@
+name: Flatpak
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'flatpak/**'
+      - 'images/**'
+      - '.github/workflows/flatpak.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'flatpak/**'
+      - 'images/**'
+      - '.github/workflows/flatpak.yml'
+
+jobs:
+  flatpak:
+    name: Build Flatpak bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install flatpak and flatpak-builder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y flatpak flatpak-builder
+
+      - name: Add Flathub remote (user)
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Cache Flatpak runtime and SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-kde-6.9-${{ runner.os }}
+          restore-keys: |
+            flatpak-kde-6.9-
+
+      - name: Install KDE Platform 6.9 and SDK
+        run: |
+          flatpak install --user -y --noninteractive flathub \
+            org.kde.Platform//6.9 \
+            org.kde.Sdk//6.9
+
+      - name: Cache flatpak-builder state
+        uses: actions/cache@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-builder-${{ hashFiles('flatpak/io.github.jgaa.lgx.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            flatpak-builder-${{ hashFiles('flatpak/io.github.jgaa.lgx.yaml') }}-
+
+      - name: Build Flatpak bundle
+        run: |
+          flatpak-builder \
+            --repo=repo \
+            --force-clean \
+            --default-branch=main \
+            --user \
+            builddir \
+            flatpak/io.github.jgaa.lgx.yaml
+
+      - name: Export bundle
+        run: |
+          flatpak build-bundle repo lgx.flatpak io.github.jgaa.lgx main
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lgx-flatpak-bundle
+          path: lgx.flatpak
+          retention-days: 14
+

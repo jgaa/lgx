@@ -225,6 +225,97 @@ cmake -S . -B build -G Ninja -DLGX_ENABLE_SYSTEMD_SOURCE=OFF
 
 ---
 
+## 6. Flatpak
+
+The `flatpak/` directory contains everything needed to build and distribute LGX as a Flatpak.
+
+> **Note:** LGX is a system-level developer tool. The Flatpak requests broad
+> permissions (`--filesystem=host`, systemd D-Bus, Docker socket) by design —
+> convenience takes priority over sandboxing.
+
+### Prerequisites
+
+```sh
+# Debian / Ubuntu
+sudo apt install flatpak flatpak-builder
+
+# Fedora
+sudo dnf install flatpak flatpak-builder
+```
+
+Add the KDE Flatpak repository (provides the Qt 6 runtime):
+
+```sh
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install flathub org.kde.Platform//6.9 org.kde.Sdk//6.9
+```
+
+### Build locally
+
+Run from the repository root:
+
+```sh
+flatpak-builder \
+  --repo=repo \
+  --force-clean \
+  builddir \
+  flatpak/io.github.jgaa.lgx.yaml
+```
+
+This clones the `qcoro` and `logfault` dependencies automatically before building.
+
+### Run directly from the build directory
+
+```sh
+flatpak-builder --run builddir flatpak/io.github.jgaa.lgx.yaml lgx
+```
+
+### Export and install a bundle
+
+```sh
+# Create a single-file bundle
+flatpak build-bundle repo lgx.flatpak io.github.jgaa.lgx
+
+# Install it
+flatpak install lgx.flatpak
+
+# Launch
+flatpak run io.github.jgaa.lgx
+```
+
+### Feature notes and required overrides
+
+| Feature | Status inside Flatpak |
+|---|---|
+| Open local files | ✅ Works (via `--filesystem=host`) |
+| systemd journal | ✅ Works (via `--talk-name=org.freedesktop.systemd1`) |
+| Docker logs | ⚠️ Requires Docker socket access — see below |
+| Pipe / shell commands | ✅ Works via `flatpak-spawn --host` |
+
+#### Docker socket access
+
+Docker's socket lives at `/var/run/docker.sock`. Grant access once with:
+
+```sh
+flatpak override --user --filesystem=/var/run/docker.sock io.github.jgaa.lgx
+```
+
+#### Full system journal (as non-root)
+
+Add your user to the `systemd-journal` group on the **host**, then log out and back in:
+
+```sh
+sudo usermod -aG systemd-journal $USER
+```
+
+### Submitting to Flathub
+
+1. Follow the [Flathub submission guide](https://docs.flathub.org/docs/for-app-authors/submission) — new applications require creating a dedicated repository under the `flathub` GitHub organisation.
+2. Before submitting, replace the `tag:` lines for `qcoro` and `logfault` in the manifest with the exact `commit:` SHA (run `git ls-remote <url> refs/tags/<tag>` to retrieve them), and verify the Boost archive `sha256:` checksum.
+3. Open a pull request to the `flathub/flathub` repository as described in the guide.
+
+---
+
 ## Status
 
 **Beta**
