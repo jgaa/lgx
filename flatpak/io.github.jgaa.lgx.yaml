@@ -22,16 +22,14 @@ finish-args:
 modules:
   # Boost headers-only library (not included in org.kde.Sdk).
   # LGX uses boost/unordered which requires only header files.
-  # Verify the sha256 against https://archives.boost.io/release/1.87.0/source/
   - name: boost-headers
     buildsystem: simple
     build-commands:
       - cp -r boost-src/boost /app/include/boost
     sources:
       - type: archive
-        url: https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz
-        # Verify: curl -L https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz.sha256sum
-        sha256: af57be25cb4c4f4b413ed692fe378affb4352ea50fbe294a11ef548f4d527d89
+        url: https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz
+        sha256: 913ca43d49e93d1b158c9862009add1518a4c665e7853b349a6492d158b036d4
         dest: boost-src
         strip-components: 1
 
