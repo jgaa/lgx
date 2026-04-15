@@ -63,13 +63,13 @@ if(LGX_ENABLE_TESTS)
 endif()
 
 find_package(Boost REQUIRED)
-find_package(Qt6 6.10 REQUIRED COMPONENTS Core Quick Qml Svg Widgets)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Quick Qml Svg Widgets)
 if(LGX_ENABLE_SYSTEMD_SOURCE)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 endif()
 
-qt_standard_project_setup(REQUIRES 6.10)
+qt_standard_project_setup(REQUIRES 6.8)
 
 if(TARGET Boost::headers)
   set(LGX_BOOST_TARGET Boost::headers)

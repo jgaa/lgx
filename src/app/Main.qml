@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "qml" as LgxQml
 import "qml/DialogHelper.js" as DialogHelper
 
 ApplicationWindow {
@@ -712,7 +711,7 @@ ApplicationWindow {
                 implicitWidth: 6
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeCurrentLogModel
                 checkable: true
                 checked: window.activeFollowing
@@ -722,7 +721,7 @@ ApplicationWindow {
                 onClicked: window.toggleActiveFollow()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView
                 checkable: true
                 checked: window.activeWrapLogLines
@@ -732,7 +731,7 @@ ApplicationWindow {
                 onClicked: window.toggleActiveWrapLogLines()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: window.activeIsFileSource
                 symbol: "refresh"
                 ToolTip.visible: hovered
@@ -752,7 +751,7 @@ ApplicationWindow {
                 }
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("player-skip-back")
                 ToolTip.visible: hovered
@@ -761,7 +760,7 @@ ApplicationWindow {
                 onClicked: window.activeLogView.scrollToFirst()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("chevrons-up")
                 ToolTip.visible: hovered
@@ -770,7 +769,7 @@ ApplicationWindow {
                 onClicked: window.activeLogView.scrollUpTenPercent()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("error-previous")
                 fgColor: "#8f2626"
@@ -780,7 +779,7 @@ ApplicationWindow {
                 onClicked: window.activeLogView.goToPreviousError()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("warning-previous")
                 fgColor: "#8a5a00"
@@ -801,7 +800,7 @@ ApplicationWindow {
                 }
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("warning-next")
                 fgColor: "#8a5a00"
@@ -811,7 +810,7 @@ ApplicationWindow {
                 onClicked: window.activeLogView.goToNextWarning()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("error-next")
                 fgColor: "#8f2626"
@@ -821,7 +820,7 @@ ApplicationWindow {
                 onClicked: window.activeLogView.goToNextError()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("chevrons-down")
                 ToolTip.visible: hovered
@@ -830,7 +829,7 @@ ApplicationWindow {
                 onClicked: window.activeLogView.scrollDownTenPercent()
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: !!window.activeLogView && window.activeLineCount > 0
                 iconSource: window.tablerIcon("player-skip-forward")
                 ToolTip.visible: hovered
@@ -934,7 +933,7 @@ ApplicationWindow {
                             font.bold: !!tabButton.tabLogModel && tabButton.tabLogModel.active
                         }
 
-                        LgxQml.SymbolToolButton {
+                        SymbolToolButton {
                             Layout.alignment: Qt.AlignVCenter
                             implicitWidth: 18
                             implicitHeight: 18
@@ -984,7 +983,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
-                    LgxQml.LogWorkspace {
+                    LogWorkspace {
                         id: workspaceItem
                         anchors.fill: parent
                         sourceUrl: parent.sourceUrl
@@ -1056,7 +1055,7 @@ ApplicationWindow {
                 bottomPadding: 0
             }
 
-            LgxQml.SymbolToolButton {
+            SymbolToolButton {
                 enabled: sourceField.text.length > 0
                 implicitWidth: 24
                 implicitHeight: 24
