@@ -1,0 +1,74 @@
+app-id: io.github.jgaa.lgx
+runtime: org.kde.Platform
+runtime-version: "6.8"
+sdk: org.kde.Sdk
+
+command: lgx
+
+# LGX is a system-level developer tool (log viewer).
+# Broad permissions are intentional — sandboxing is not a priority.
+finish-args:
+  # Full filesystem access for opening arbitrary log files
+  - --filesystem=host
+  # Wayland and X11 display access
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # D-Bus access for systemd journal integration
+  - --talk-name=org.freedesktop.systemd1
+  # Allow spawning commands on the host (e.g. docker, journalctl)
+  - --talk-name=org.freedesktop.Flatpak
+
+modules:
+  # Boost headers-only library (not included in org.kde.Sdk).
+  # LGX uses boost/unordered which requires only header files.
+  # Verify the sha256 against https://archives.boost.io/release/1.87.0/source/
+  - name: boost-headers
+    buildsystem: simple
+    build-commands:
+      - cp -r boost-src/boost /app/include/boost
+    sources:
+      - type: archive
+        url: https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz
+        # Verify: curl -L https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz.sha256sum
+        sha256: af57be25cb4c4f4b413ed692fe378affb4352ea50fbe294a11ef548f4d527d89
+        dest: boost-src
+        strip-components: 1
+
+  - name: lgx
+    buildsystem: simple
+    build-commands:
+      - |
+        cmake -S . -B _build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/app \
+          -DLGX_QCORO_SOURCE_DIR="$(pwd)/third_party/qcoro" \
+          -DLGX_LOGFAULT_SOURCE_DIR="$(pwd)/third_party/logfault" \
+          -DLGX_ENABLE_TESTS=OFF \
+          -DLGX_ENABLE_SYSTEMD_SOURCE=ON
+      - cmake --build _build --parallel
+      - install -Dm755 _build/bin/lgx /app/bin/lgx
+      - install -Dm644 images/lgxicon.svg /app/share/icons/hicolor/scalable/apps/io.github.jgaa.lgx.svg
+      - install -Dm644 flatpak/io.github.jgaa.lgx.desktop /app/share/applications/io.github.jgaa.lgx.desktop
+      - install -Dm644 flatpak/io.github.jgaa.lgx.metainfo.xml /app/share/metainfo/io.github.jgaa.lgx.metainfo.xml
+    sources:
+      # Main LGX source tree
+      - type: dir
+        path: ..
+
+      # qcoro — fetched offline so flatpak-builder clones it before the build
+      # cmake is told where to find it via LGX_QCORO_SOURCE_DIR.
+      # For reproducible / Flathub builds, replace the tag with the exact commit SHA:
+      #   git ls-remote https://github.com/qcoro/qcoro.git refs/tags/v0.12.0
+      - type: git
+        url: https://github.com/qcoro/qcoro.git
+        tag: v0.12.0
+        dest: third_party/qcoro
+
+      # logfault — same pattern.
+      # For Flathub, replace tag with the exact commit SHA:
+      #   git ls-remote https://github.com/jgaa/logfault.git refs/tags/v0.8.5
+      - type: git
+        url: https://github.com/jgaa/logfault.git
+        tag: v0.8.5
+        dest: third_party/logfault
