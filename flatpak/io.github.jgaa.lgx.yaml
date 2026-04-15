@@ -28,8 +28,8 @@ modules:
       - cp -r boost-src/boost /app/include/boost
     sources:
       - type: archive
-        url: https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz
-        sha256: 913ca43d49e93d1b158c9862009add1518a4c665e7853b349a6492d158b036d4
+        url: https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-b2-nodocs.tar.gz
+        sha256: e848446c6fec62d8a96b44ed7352238b3de040b8b9facd4d6963b32f541e00f5
         dest: boost-src
         strip-components: 1
 
