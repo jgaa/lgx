@@ -25,6 +25,7 @@ modules:
   - name: boost-headers
     buildsystem: simple
     build-commands:
+      - mkdir -p /app/include
       - cp -r boost-src/boost /app/include/boost
     sources:
       - type: archive
