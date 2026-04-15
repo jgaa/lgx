@@ -22,11 +22,38 @@ finish-args:
 modules:
   # Boost headers-only library (not included in org.kde.Sdk).
   # LGX uses boost/unordered which requires only header files.
+  # We also install a minimal BoostConfig.cmake so CMake's find_package(Boost)
+  # can locate Boost in config mode (required by newer CMake versions that no
+  # longer ship FindBoost.cmake).
   - name: boost-headers
     buildsystem: simple
     build-commands:
-      - mkdir -p /app/include
+      - mkdir -p /app/include /app/lib/cmake/Boost-1.90.0
       - cp -r boost-src/boost /app/include/boost
+      - |
+        cat > /app/lib/cmake/Boost-1.90.0/BoostConfig.cmake << 'CMEOF'
+        set(Boost_FOUND TRUE)
+        set(Boost_VERSION "1.90.0")
+        if(NOT TARGET Boost::headers)
+          add_library(Boost::headers INTERFACE IMPORTED)
+          set_target_properties(Boost::headers PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "/app/include")
+        endif()
+        if(NOT TARGET Boost::boost)
+          add_library(Boost::boost INTERFACE IMPORTED)
+          set_target_properties(Boost::boost PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "/app/include")
+        endif()
+        CMEOF
+      - |
+        cat > /app/lib/cmake/Boost-1.90.0/BoostConfigVersion.cmake << 'CMEOF'
+        set(PACKAGE_VERSION "1.90.0")
+        if(PACKAGE_FIND_VERSION VERSION_GREATER "1.90.0")
+          set(PACKAGE_VERSION_COMPATIBLE FALSE)
+        else()
+          set(PACKAGE_VERSION_COMPATIBLE TRUE)
+        endif()
+        CMEOF
     sources:
       - type: archive
         url: https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-b2-nodocs.tar.gz
@@ -41,6 +68,7 @@ modules:
         cmake -S . -B _build -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/app \
+          -DCMAKE_PREFIX_PATH=/app \
           -DLGX_QCORO_SOURCE_DIR="$(pwd)/third_party/qcoro" \
           -DLGX_LOGFAULT_SOURCE_DIR="$(pwd)/third_party/logfault" \
           -DLGX_ENABLE_TESTS=OFF \
