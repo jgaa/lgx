@@ -13,6 +13,12 @@
       LGX is a modern, high-performance log viewer for Linux that scales from
       single files to multi-million-line logs and streaming sources.
     </p>
+    <p>
+      The Flatpak build exists for distribution convenience and easy
+      installation, not for restrictive sandboxing. LGX is a host-integrated
+      developer tool and intentionally keeps access to local files, the systemd
+      journal, and host commands such as docker, adb, and shell pipelines.
+    </p>
     <p>Features include:</p>
     <ul>
       <li>Open multiple logs in tabs, like a web browser</li>

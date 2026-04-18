@@ -27,6 +27,7 @@
 
 #include "UiSettings.h"
 #include "logging.h"
+#include "util.h"
 
 namespace lgx {
 
@@ -111,8 +112,7 @@ class PipeStreamProvider final : public IStreamProvider {
   }
 
   void start() override {
-    process_.setProgram(QStringLiteral("/bin/sh"));
-    process_.setArguments({QStringLiteral("-lc"), command_});
+    configureHostProcess(process_, QStringLiteral("/bin/sh"), {QStringLiteral("-lc"), command_});
     process_.setProcessChannelMode(QProcess::SeparateChannels);
     process_.start();
   }
@@ -179,7 +179,6 @@ class DockerStreamProvider final : public IStreamProvider {
   }
 
   void start() override {
-    process_.setProgram(QStringLiteral("docker"));
     QStringList arguments{
         QStringLiteral("logs"),
         QStringLiteral("-f"),
@@ -190,7 +189,7 @@ class DockerStreamProvider final : public IStreamProvider {
       arguments.push_back(QStringLiteral("0s"));
     }
     arguments.push_back(container_id_);
-    process_.setArguments(arguments);
+    configureHostProcess(process_, QStringLiteral("docker"), arguments);
     process_.setProcessChannelMode(QProcess::SeparateChannels);
     process_.start();
   }
@@ -265,7 +264,6 @@ class AdbLogcatProvider final : public IStreamProvider {
       return;
     }
 
-    process_.setProgram(adb_path);
     QStringList arguments{
         QStringLiteral("-s"),
         serial_,
@@ -277,7 +275,7 @@ class AdbLogcatProvider final : public IStreamProvider {
     }
     arguments.push_back(QStringLiteral("-v"));
     arguments.push_back(QStringLiteral("threadtime"));
-    process_.setArguments(arguments);
+    configureHostProcess(process_, adb_path, arguments);
     process_.setProcessChannelMode(QProcess::SeparateChannels);
     LOG_INFO << "Starting adb logcat provider with program='"
              << adb_path.toStdString() << "' serial='" << serial_.toStdString()

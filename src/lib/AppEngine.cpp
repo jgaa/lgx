@@ -30,6 +30,7 @@
 #include "StreamSource.h"
 #include "UiSettings.h"
 #include "logging.h"
+#include "util.h"
 
 namespace lgx {
 namespace {
@@ -102,8 +103,7 @@ QString adbProgramName() {
 }
 
 bool isExecutableFile(const QString& path) {
-  const QFileInfo info(path);
-  return info.exists() && info.isFile() && info.isExecutable();
+  return isHostExecutableFile(path);
 }
 
 QString processLabel(const QString& name, int pid) {
@@ -201,8 +201,7 @@ QHash<int, QString> queryAdbProcessesForSerial(const QString& adb_path, const QS
 
   auto run_query = [&adb_path, &serial](const QStringList& arguments) -> QString {
     QProcess process;
-    process.setProgram(adb_path);
-    process.setArguments(arguments);
+    configureHostProcess(process, adb_path, arguments);
     process.start();
     if (!process.waitForFinished(3000)) {
       process.kill();
@@ -234,8 +233,7 @@ QString adbVersionText(const QString& executable_path) {
   }
 
   QProcess process;
-  process.setProgram(executable_path);
-  process.setArguments({QStringLiteral("version")});
+  configureHostProcess(process, executable_path, {QStringLiteral("version")});
   process.start();
   if (!process.waitForFinished(2000)) {
     process.kill();
@@ -360,7 +358,7 @@ AppEngine::AppEngine(QObject* parent)
   if (auto* app = QCoreApplication::instance()) {
     app->installEventFilter(this);
   }
-  docker_executable_ = QStandardPaths::findExecutable(QStringLiteral("docker"));
+  docker_executable_ = findHostExecutable(QStringLiteral("docker"));
   connect(&UiSettings::instance(), &UiSettings::adbExecutablePathChanged, this, [this]() {
     emit adbExecutablePathChanged();
     emit adbAvailabilityChanged();
@@ -626,7 +624,7 @@ int AppEngine::scanAdbExecutables() {
     });
   };
 
-  const auto from_path = QStandardPaths::findExecutable(adbProgramName());
+  const auto from_path = findHostExecutable(adbProgramName());
   if (!from_path.isEmpty()) {
     add_candidate(from_path, tr("PATH"));
   }
@@ -671,8 +669,7 @@ bool AppEngine::refreshAdbDevices() {
   }
 
   QProcess process;
-  process.setProgram(adbExecutablePath());
-  process.setArguments({QStringLiteral("devices"), QStringLiteral("-l")});
+  configureHostProcess(process, adbExecutablePath(), {QStringLiteral("devices"), QStringLiteral("-l")});
   process.start();
   if (!process.waitForFinished(5000)) {
     process.kill();
@@ -763,8 +760,9 @@ bool AppEngine::refreshDockerContainers() {
   }
 
   QProcess process;
-  process.setProgram(docker_executable_);
-  process.setArguments({QStringLiteral("ps"),
+  configureHostProcess(process,
+                       docker_executable_,
+                       {QStringLiteral("ps"),
                         QStringLiteral("--format"),
                         QStringLiteral("{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}")});
   process.start();

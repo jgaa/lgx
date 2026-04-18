@@ -230,7 +230,7 @@ cmake -S . -B build -G Ninja -DLGX_ENABLE_SYSTEMD_SOURCE=OFF
 The `flatpak/` directory contains everything needed to build and distribute LGX as a Flatpak.
 
 > **Note:** LGX is a system-level developer tool. The Flatpak requests broad
-> permissions (`--filesystem=host`, systemd D-Bus, Docker socket) by design —
+> permissions (`--filesystem=host`, systemd D-Bus, host command execution) by design —
 > convenience takes priority over sandboxing.
 
 ### Prerequisites
@@ -289,16 +289,12 @@ flatpak run io.github.jgaa.lgx
 |---|---|
 | Open local files | ✅ Works (via `--filesystem=host`) |
 | systemd journal | ✅ Works (via `--talk-name=org.freedesktop.systemd1`) |
-| Docker logs | ⚠️ Requires Docker socket access — see below |
+| Docker logs | ✅ Works via host `docker` with `flatpak-spawn --host` |
 | Pipe / shell commands | ✅ Works via `flatpak-spawn --host` |
+| Android logcat | ✅ Works via host `adb` with `flatpak-spawn --host` |
 
-#### Docker socket access
-
-Docker's socket lives at `/var/run/docker.sock`. Grant access once with:
-
-```sh
-flatpak override --user --filesystem=/var/run/docker.sock io.github.jgaa.lgx
-```
+LGX does not rely on a sandbox-mounted `docker.sock`; it shells out to the host
+`docker` and `adb` executables when running inside Flatpak.
 
 #### Full system journal (as non-root)
 

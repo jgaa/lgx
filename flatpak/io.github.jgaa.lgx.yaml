@@ -5,18 +5,19 @@ sdk: org.kde.Sdk
 
 command: lgx
 
-# LGX is a system-level developer tool (log viewer).
-# Broad permissions are intentional — sandboxing is not a priority.
+# LGX is packaged as a Flatpak for distribution convenience, updates, and
+# installation comfort. It is not intended to be meaningfully sandboxed.
+# The app is a system-level developer tool and needs broad host integration.
 finish-args:
-  # Full filesystem access for opening arbitrary log files
+  # Full filesystem access for arbitrary log files and project trees
   - --filesystem=host
-  # Wayland and X11 display access
+  # Normal desktop integration
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
-  # D-Bus access for systemd journal integration
+  # Host journal access
   - --talk-name=org.freedesktop.systemd1
-  # Allow spawning commands on the host (e.g. docker, journalctl)
+  # Host command execution for docker, adb, shell pipelines, and similar tools
   - --talk-name=org.freedesktop.Flatpak
 
 modules:
