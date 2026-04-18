@@ -259,7 +259,7 @@ flatpak-builder \
   --repo=repo \
   --force-clean \
   builddir \
-  flatpak/io.github.jgaa.lgx.yaml
+  flatpak/eu.lastviking.lgx.yaml
 ```
 
 This clones the `qcoro` and `logfault` dependencies automatically before building.
@@ -267,20 +267,20 @@ This clones the `qcoro` and `logfault` dependencies automatically before buildin
 ### Run directly from the build directory
 
 ```sh
-flatpak-builder --run builddir flatpak/io.github.jgaa.lgx.yaml lgx
+flatpak-builder --run builddir flatpak/eu.lastviking.lgx.yaml lgx
 ```
 
 ### Export and install a bundle
 
 ```sh
 # Create a single-file bundle
-flatpak build-bundle repo lgx.flatpak io.github.jgaa.lgx
+flatpak build-bundle repo lgx.flatpak eu.lastviking.lgx
 
 # Install it
 flatpak install lgx.flatpak
 
 # Launch
-flatpak run io.github.jgaa.lgx
+flatpak run eu.lastviking.lgx
 ```
 
 ### Feature notes and required overrides

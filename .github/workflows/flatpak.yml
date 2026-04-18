@@ -63,9 +63,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .flatpak-builder
-          key: flatpak-builder-${{ hashFiles('flatpak/io.github.jgaa.lgx.yaml') }}-${{ github.sha }}
+          key: flatpak-builder-${{ hashFiles('flatpak/eu.lastviking.lgx.yaml') }}-${{ github.sha }}
           restore-keys: |
-            flatpak-builder-${{ hashFiles('flatpak/io.github.jgaa.lgx.yaml') }}-
+            flatpak-builder-${{ hashFiles('flatpak/eu.lastviking.lgx.yaml') }}-
 
       - name: Build Flatpak bundle
         run: |
@@ -75,11 +75,11 @@ jobs:
             --default-branch=main \
             --user \
             builddir \
-            flatpak/io.github.jgaa.lgx.yaml
+            flatpak/eu.lastviking.lgx.yaml
 
       - name: Export bundle
         run: |
-          flatpak build-bundle repo lgx.flatpak io.github.jgaa.lgx main
+          flatpak build-bundle repo lgx.flatpak eu.lastviking.lgx main
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
@@ -87,4 +87,3 @@ jobs:
           name: lgx-flatpak-bundle
           path: lgx.flatpak
           retention-days: 14
-
