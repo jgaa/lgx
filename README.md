@@ -215,6 +215,12 @@ Debian/Ubuntu:
 apt install flatpak
 ```
 
+Fedora:
+
+```sh
+dnf install flatpak
+```
+
 openSUSE:
 
 ```sh
