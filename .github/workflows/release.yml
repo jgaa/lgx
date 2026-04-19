@@ -145,28 +145,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_TAG: ${{ github.ref_name }}
-          REPOSITORY: ${{ github.repository }}
         run: |
           asset_name="${{ needs.flatpak.outputs.bundle-name }}"
-          release_id="${{ steps.release.outputs.id }}"
-          existing_asset_id="$(gh api "repos/${REPOSITORY}/releases/${release_id}/assets" --jq ".[] | select(.name == \"${asset_name}\") | .id" | head -n1 || true)"
-          if [ -n "${existing_asset_id}" ]; then
-            gh api --method DELETE "repos/${REPOSITORY}/releases/assets/${existing_asset_id}"
-          fi
+          bundle_path="${{ steps.bundle.outputs.path }}"
           for attempt in 1 2 3 4 5; do
-            if gh api \
-              --method POST \
-              --hostname uploads.github.com \
-              -H "Content-Type: application/octet-stream" \
-              --input "${{ steps.bundle.outputs.path }}" \
-              "repos/${REPOSITORY}/releases/${release_id}/assets?name=${asset_name}"; then
+            if gh release upload "${CURRENT_TAG}" "${bundle_path}#${asset_name}" --repo "${GITHUB_REPOSITORY}" --clobber; then
               exit 0
             fi
             if [ "${attempt}" -eq 5 ]; then
               echo "Failed to upload release asset '${asset_name}' after ${attempt} attempts." >&2
               exit 1
             fi
-            sleep $((attempt * 5))
+            sleep $((attempt * 10))
           done
 
       - name: Verify Flatpak asset on release
