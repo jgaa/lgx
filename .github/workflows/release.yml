@@ -127,7 +127,8 @@ jobs:
               "tag_name": os.environ["CURRENT_TAG"],
               "target_commitish": os.environ["GITHUB_SHA"],
               "name": os.environ["CURRENT_TAG"],
-              "draft": True,
+              "draft": False,
+              "prerelease": True,
               "body": Path("release-notes.md").read_text(),
           }
           Path("release-payload.json").write_text(json.dumps(payload))
