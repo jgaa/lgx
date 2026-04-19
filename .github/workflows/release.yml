@@ -153,12 +153,21 @@ jobs:
           if [ -n "${existing_asset_id}" ]; then
             gh api --method DELETE "repos/${REPOSITORY}/releases/assets/${existing_asset_id}"
           fi
-          gh api \
-            --method POST \
-            --hostname uploads.github.com \
-            -H "Content-Type: application/octet-stream" \
-            --input "${{ steps.bundle.outputs.path }}" \
-            "repos/${REPOSITORY}/releases/${release_id}/assets?name=${asset_name}"
+          for attempt in 1 2 3 4 5; do
+            if gh api \
+              --method POST \
+              --hostname uploads.github.com \
+              -H "Content-Type: application/octet-stream" \
+              --input "${{ steps.bundle.outputs.path }}" \
+              "repos/${REPOSITORY}/releases/${release_id}/assets?name=${asset_name}"; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              echo "Failed to upload release asset '${asset_name}' after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Verify Flatpak asset on release
         env:

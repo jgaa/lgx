@@ -4,7 +4,7 @@ if(POLICY CMP0167)
   cmake_policy(SET CMP0167 NEW)
 endif()
 
-project(lgx VERSION 0.2.2 LANGUAGES CXX)
+project(lgx VERSION 0.2.3 LANGUAGES CXX)
 
 add_definitions(-DLGX_VERSION=\"${CMAKE_PROJECT_VERSION}\")
 
