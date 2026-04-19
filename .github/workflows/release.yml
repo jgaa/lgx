@@ -112,22 +112,34 @@ jobs:
           echo "path=${bundle_path}" >> "$GITHUB_OUTPUT"
 
       - name: Create or update draft release
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          if gh release view "$CURRENT_TAG" >/dev/null 2>&1; then
-            gh release edit "$CURRENT_TAG" \
-              --title "$CURRENT_TAG" \
-              --draft=true \
-              --notes-file release-notes.md
+          release_id="$(gh api "repos/${REPOSITORY}/releases" --jq ".[] | select(.tag_name == \"${CURRENT_TAG}\") | .id" | head -n1 || true)"
+          if [ -n "${release_id}" ]; then
+            gh api \
+              --method PATCH \
+              "repos/${REPOSITORY}/releases/${release_id}" \
+              -f tag_name="${CURRENT_TAG}" \
+              -f target_commitish="${GITHUB_SHA}" \
+              -f name="${CURRENT_TAG}" \
+              -F draft=true \
+              -f body="$(cat release-notes.md)"
           else
-            gh release create "$CURRENT_TAG" \
-              --draft \
-              --verify-tag \
-              --title "$CURRENT_TAG" \
-              --notes-file release-notes.md
+            release_id="$(gh api \
+              --method POST \
+              "repos/${REPOSITORY}/releases" \
+              -f tag_name="${CURRENT_TAG}" \
+              -f target_commitish="${GITHUB_SHA}" \
+              -f name="${CURRENT_TAG}" \
+              -F draft=true \
+              -f body="$(cat release-notes.md)" \
+              --jq '.id')"
           fi
+          echo "id=${release_id}" >> "$GITHUB_OUTPUT"
 
       - name: Upload Flatpak to draft release
         env:
@@ -136,7 +148,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           asset_name="${{ needs.flatpak.outputs.bundle-name }}"
-          release_id="$(gh api "repos/${REPOSITORY}/releases/tags/${CURRENT_TAG}" --jq '.id')"
+          release_id="${{ steps.release.outputs.id }}"
           existing_asset_id="$(gh api "repos/${REPOSITORY}/releases/${release_id}/assets" --jq ".[] | select(.name == \"${asset_name}\") | .id" | head -n1 || true)"
           if [ -n "${existing_asset_id}" ]; then
             gh api --method DELETE "repos/${REPOSITORY}/releases/assets/${existing_asset_id}"
@@ -155,7 +167,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           asset_name="${{ needs.flatpak.outputs.bundle-name }}"
-          release_id="$(gh api "repos/${REPOSITORY}/releases/tags/${CURRENT_TAG}" --jq '.id')"
+          release_id="${{ steps.release.outputs.id }}"
           browser_url="$(gh api "repos/${REPOSITORY}/releases/${release_id}/assets" --jq ".[] | select(.name == \"${asset_name}\") | .browser_download_url" | head -n1 || true)"
           if [ -z "${browser_url}" ]; then
             echo "Flatpak asset '${asset_name}' was not attached to release '${CURRENT_TAG}'." >&2
