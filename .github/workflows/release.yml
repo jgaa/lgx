@@ -92,10 +92,24 @@ jobs:
           } > release-notes.md
 
       - name: Download Flatpak bundle
-        uses: actions/download-artifact@v6
+        id: download-flatpak
+        uses: actions/download-artifact@v5
         with:
           name: ${{ needs.flatpak.outputs.artifact-name }}
           path: dist
+
+      - name: Resolve Flatpak bundle path
+        id: bundle
+        env:
+          EXPECTED_BUNDLE_NAME: ${{ needs.flatpak.outputs.bundle-name }}
+        run: |
+          bundle_path="$(find "${{ steps.download-flatpak.outputs.download-path }}" -type f -name "${EXPECTED_BUNDLE_NAME}" -print -quit)"
+          if [ -z "$bundle_path" ]; then
+            echo "Failed to find downloaded Flatpak bundle '${EXPECTED_BUNDLE_NAME}'." >&2
+            find "${{ steps.download-flatpak.outputs.download-path }}" -maxdepth 3 -type f -print >&2 || true
+            exit 1
+          fi
+          echo "path=${bundle_path}" >> "$GITHUB_OUTPUT"
 
       - name: Create or update draft release
         env:
@@ -120,4 +134,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CURRENT_TAG: ${{ github.ref_name }}
         run: |
-          gh release upload "$CURRENT_TAG" "dist/${{ needs.flatpak.outputs.bundle-name }}" --clobber
+          gh release upload "$CURRENT_TAG" "${{ steps.bundle.outputs.path }}" --clobber
