@@ -203,7 +203,54 @@ cmake -S . -B build -G Ninja -DLGX_ENABLE_SYSTEMD_SOURCE=OFF
 
 ## Flatpak
 
-The app is distributed for Linux as a *Flatpak*. Get the newest version from the latest release.
+The app is distributed for Linux as a *Flatpak*. Get the newest `.flatpak` bundle from the latest GitHub release.
+
+### Install Flatpak
+
+Install Flatpak with your distro package manager:
+
+Debian/Ubuntu:
+
+```sh
+apt install flatpak
+```
+
+openSUSE:
+
+```sh
+zypper install flatpak
+```
+
+Arch Linux:
+
+```sh
+pacman -S flatpak
+```
+
+Log out and back in if your desktop session does not immediately pick up Flatpak integration.
+
+### Install LGX Flatpak
+
+Download the release artifact, for example `lgx-v0.2.5.flatpak`, then install it for your user:
+
+```sh
+flatpak install --user ./lgx-v0.2.5.flatpak
+```
+
+On most distributions, it will be available from the start menu under `Development`. 
+If you just installed the flatpak runtime, you might have to log out and back in.
+
+You can also riun it directly from the shell:
+
+```sh
+flatpak run eu.lastviking.lgx
+```
+
+To update to a newer downloaded bundle:
+
+```sh
+flatpak install --user ./lgx-v0.2.6.flatpak
+```
 
 ## Status
 
