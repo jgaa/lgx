@@ -15,9 +15,7 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
-  # Host journal access
-  - --talk-name=org.freedesktop.systemd1
-  # Host command execution for docker, adb, shell pipelines, and similar tools
+  # Host command execution for docker, adb, journalctl, shell pipelines, and similar tools
   - --talk-name=org.freedesktop.Flatpak
 
 modules:
