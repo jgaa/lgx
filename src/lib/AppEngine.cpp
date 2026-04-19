@@ -444,7 +444,7 @@ bool AppEngine::dockerAvailable() const noexcept {
 
 bool AppEngine::systemdAvailable() const noexcept {
 #ifdef LGX_ENABLE_SYSTEMD_SOURCE
-  return true;
+  return !isRunningInFlatpak() || canSpawnHostCommands();
 #else
   return false;
 #endif

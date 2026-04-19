@@ -5,6 +5,10 @@
 #include <QDateTime>
 #include <QHash>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QProcess>
 #include <QSocketNotifier>
 #include <QStandardPaths>
@@ -66,6 +70,96 @@ bool queryFlagValue(const QUrlQuery& query, QStringView key, bool default_value)
 
   return value != QStringLiteral("0")
       && value.compare(QStringLiteral("false"), Qt::CaseInsensitive) != 0;
+}
+
+QByteArray displaySystemdField(QByteArray value) {
+  value.replace('\t', ' ');
+  value.replace('\r', "\\r");
+  value.replace('\n', "\\n");
+  return value;
+}
+
+QByteArray systemdPriorityName(const QByteArray& priority) {
+  bool ok = false;
+  const auto value = priority.toUInt(&ok);
+  if (!ok) {
+    return "INFO";
+  }
+  if (value <= 3U) {
+    return "ERROR";
+  }
+  if (value == 4U) {
+    return "WARN";
+  }
+  if (value == 5U) {
+    return "NOTICE";
+  }
+  if (value == 7U) {
+    return "DEBUG";
+  }
+  return "INFO";
+}
+
+QByteArray formatSystemdFriendlyLine(uint64_t realtime_usecs, QByteArray priority, QByteArray process,
+                                     uint32_t pid, QByteArray message) {
+  QByteArray process_label = displaySystemdField(std::move(process));
+  if (pid > 0U) {
+    process_label += '[';
+    process_label += QByteArray::number(pid);
+    process_label += ']';
+  } else if (process_label.isEmpty()) {
+    process_label = "unknown";
+  }
+
+  const auto timestamp =
+      QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(realtime_usecs / 1000U))
+          .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
+          .toUtf8();
+
+  QByteArray line;
+  line.reserve(128 + message.size());
+  line += timestamp;
+  line += ' ';
+  line += systemdPriorityName(priority);
+  line += ' ';
+  line += process_label;
+  line += ": ";
+  line += displaySystemdField(std::move(message));
+  line += '\n';
+  return line;
+}
+
+QByteArray jsonValueToUtf8(const QJsonValue& value) {
+  switch (value.type()) {
+    case QJsonValue::String:
+      return value.toString().toUtf8();
+    case QJsonValue::Double: {
+      const auto number = value.toDouble();
+      if (std::isfinite(number) && std::floor(number) == number) {
+        return QByteArray::number(static_cast<qint64>(number));
+      }
+      return QByteArray::number(number, 'g', 16);
+    }
+    case QJsonValue::Bool:
+      return value.toBool() ? QByteArrayLiteral("true") : QByteArrayLiteral("false");
+    case QJsonValue::Array: {
+      const auto array = value.toArray();
+      if (array.isEmpty()) {
+        return {};
+      }
+      if (array.size() == 1) {
+        return jsonValueToUtf8(array.first());
+      }
+      return QJsonDocument(array).toJson(QJsonDocument::Compact);
+    }
+    case QJsonValue::Object:
+      return QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact);
+    case QJsonValue::Null:
+    case QJsonValue::Undefined:
+      return {};
+  }
+
+  return {};
 }
 
 class PipeStreamProvider final : public IStreamProvider {
@@ -306,6 +400,143 @@ class AdbLogcatProvider final : public IStreamProvider {
 };
 
 #ifdef LGX_ENABLE_SYSTEMD_SOURCE
+class HostSystemdJournalProvider final : public IStreamProvider {
+ public:
+  explicit HostSystemdJournalProvider(QString process_name, QString start_mode)
+      : process_name_(std::move(process_name)),
+        start_mode_(std::move(start_mode)) {
+    QObject::connect(&process_, &QProcess::readyReadStandardOutput, &process_, [this]() {
+      stdout_buffer_ += process_.readAllStandardOutput();
+      emitAvailableLines();
+    });
+    QObject::connect(&process_, &QProcess::readyReadStandardError, &process_, [this]() {
+      stderr_buffer_ += process_.readAllStandardError();
+    });
+    QObject::connect(&process_, &QProcess::errorOccurred, &process_,
+                     [this](QProcess::ProcessError error) {
+                       if ((error == QProcess::Crashed || error == QProcess::FailedToStart)
+                           && callbacks_.on_error) {
+                         callbacks_.on_error(process_.errorString());
+                       }
+                     });
+    QObject::connect(&process_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), &process_,
+                     [this](int exit_code, QProcess::ExitStatus exit_status) {
+                       emitAvailableLines();
+                       if ((exit_status != QProcess::NormalExit || exit_code != 0)
+                           && callbacks_.on_error) {
+                         const auto text = QString::fromUtf8(stderr_buffer_).trimmed();
+                         callbacks_.on_error(text.isEmpty() ? QObject::tr("journalctl exited with an error.")
+                                                            : text);
+                       }
+                       if (callbacks_.on_finished) {
+                         callbacks_.on_finished();
+                       }
+                     });
+  }
+
+  void setCallbacks(Callbacks callbacks) override {
+    callbacks_ = std::move(callbacks);
+  }
+
+  void start() override {
+    QStringList arguments{
+        QStringLiteral("--no-pager"),
+        QStringLiteral("--follow"),
+        QStringLiteral("--output=json"),
+        QStringLiteral("--all"),
+    };
+    if (start_mode_ == QStringLiteral("now")) {
+      arguments.push_back(QStringLiteral("-n"));
+      arguments.push_back(QStringLiteral("0"));
+    } else if (start_mode_ == QStringLiteral("today")) {
+      arguments.push_back(QStringLiteral("--since=today"));
+    } else if (start_mode_ == QStringLiteral("7d")) {
+      arguments.push_back(QStringLiteral("--since=7 days ago"));
+    }
+    if (!process_name_.trimmed().isEmpty()) {
+      arguments.push_back(QStringLiteral("_COMM=%1").arg(process_name_.trimmed()));
+      arguments.push_back(QStringLiteral("+"));
+      arguments.push_back(QStringLiteral("SYSLOG_IDENTIFIER=%1").arg(process_name_.trimmed()));
+    }
+
+    configureHostProcess(process_, QStringLiteral("journalctl"), arguments);
+    process_.setProcessChannelMode(QProcess::SeparateChannels);
+    process_.start();
+  }
+
+  void stop() override {
+    if (process_.state() == QProcess::NotRunning) {
+      return;
+    }
+
+    callbacks_ = {};
+    QObject::disconnect(&process_, nullptr, &process_, nullptr);
+    process_.blockSignals(true);
+    process_.terminate();
+    if (!process_.waitForFinished(500)) {
+      process_.kill();
+      process_.waitForFinished(500);
+    }
+  }
+
+ private:
+  void emitAvailableLines() {
+    while (true) {
+      const auto newline = stdout_buffer_.indexOf('\n');
+      if (newline < 0) {
+        break;
+      }
+
+      QByteArray line = stdout_buffer_.first(newline);
+      stdout_buffer_.remove(0, newline + 1);
+      if (!line.isEmpty() && line.back() == '\r') {
+        line.chop(1);
+      }
+      if (line.trimmed().isEmpty()) {
+        continue;
+      }
+
+      if (const auto formatted = formatJsonEntry(line); !formatted.isEmpty() && callbacks_.on_bytes) {
+        callbacks_.on_bytes(formatted);
+      }
+    }
+  }
+
+  QByteArray formatJsonEntry(const QByteArray& line) const {
+    QJsonParseError parse_error;
+    const auto document = QJsonDocument::fromJson(line, &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
+      return line + '\n';
+    }
+
+    const auto object = document.object();
+    const auto timestamp = jsonValueToUtf8(object.value(QStringLiteral("__REALTIME_TIMESTAMP")));
+    bool usecs_ok = false;
+    const auto realtime_usecs = timestamp.toULongLong(&usecs_ok);
+    if (!usecs_ok) {
+      return line + '\n';
+    }
+
+    const auto priority = jsonValueToUtf8(object.value(QStringLiteral("PRIORITY")));
+    const auto pid_text = jsonValueToUtf8(object.value(QStringLiteral("_PID")));
+    bool pid_ok = false;
+    const auto pid = pid_text.toUInt(&pid_ok);
+    QByteArray process = jsonValueToUtf8(object.value(QStringLiteral("_COMM")));
+    if (process.isEmpty()) {
+      process = jsonValueToUtf8(object.value(QStringLiteral("SYSLOG_IDENTIFIER")));
+    }
+    const auto message = jsonValueToUtf8(object.value(QStringLiteral("MESSAGE")));
+    return formatSystemdFriendlyLine(realtime_usecs, priority, process, pid_ok ? pid : 0U, message);
+  }
+
+  QProcess process_;
+  Callbacks callbacks_;
+  QString process_name_;
+  QString start_mode_;
+  QByteArray stdout_buffer_;
+  QByteArray stderr_buffer_;
+};
+
 class SystemdJournalProvider final : public IStreamProvider {
  public:
   explicit SystemdJournalProvider(QString process_name, QString start_mode)
@@ -426,34 +657,6 @@ class SystemdJournalProvider final : public IStreamProvider {
     return field;
   }
 
-  static QByteArray displayField(QByteArray value) {
-    value.replace('\t', ' ');
-    value.replace('\r', "\\r");
-    value.replace('\n', "\\n");
-    return value;
-  }
-
-  static QByteArray priorityName(const QByteArray& priority) {
-    bool ok = false;
-    const auto value = priority.toUInt(&ok);
-    if (!ok) {
-      return "INFO";
-    }
-    if (value <= 3U) {
-      return "ERROR";
-    }
-    if (value == 4U) {
-      return "WARN";
-    }
-    if (value == 5U) {
-      return "NOTICE";
-    }
-    if (value == 7U) {
-      return "DEBUG";
-    }
-    return "INFO";
-  }
-
   QByteArray processNameForPid(uint32_t pid) const {
     if (pid == 0U) {
       return {};
@@ -488,31 +691,7 @@ class SystemdJournalProvider final : public IStreamProvider {
       process = processNameForPid(pid);
     }
 
-    QByteArray process_label = displayField(process);
-    if (pid_ok && pid > 0U) {
-      process_label += '[';
-      process_label += QByteArray::number(pid);
-      process_label += ']';
-    } else if (process_label.isEmpty()) {
-      process_label = "unknown";
-    }
-
-    const auto timestamp =
-        QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(realtime_usecs / 1000U))
-            .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
-            .toUtf8();
-
-    QByteArray line;
-    line.reserve(128 + message.size());
-    line += timestamp;
-    line += ' ';
-    line += priorityName(priority);
-    line += ' ';
-    line += process_label;
-    line += ": ";
-    line += displayField(message);
-    line += '\n';
-    return line;
+    return formatSystemdFriendlyLine(realtime_usecs, priority, process, pid_ok ? pid : 0U, message);
   }
 
   void drainAvailableEntries() {
@@ -956,6 +1135,10 @@ std::unique_ptr<IStreamProvider> StreamSource::createProvider(const QUrl& url) {
   if (const auto systemd_spec = parseSystemdJournalSpec(url); systemd_spec.has_value()) {
 #ifdef LGX_ENABLE_SYSTEMD_SOURCE
     LOG_INFO << "Using systemd journal provider";
+    if (isRunningInFlatpak()) {
+      return std::make_unique<HostSystemdJournalProvider>(systemd_spec->process_name,
+                                                          systemd_spec->start_mode);
+    }
     return std::make_unique<SystemdJournalProvider>(systemd_spec->process_name,
                                                     systemd_spec->start_mode);
 #else
