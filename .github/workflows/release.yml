@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  guard:
+    name: Verify release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      eligible: ${{ steps.guard.outputs.eligible }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag points to main
+        id: guard
+        run: |
+          git fetch origin main --depth=1
+          if git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${GITHUB_REF_NAME} does not point to a commit on main. Skipping release."
+          fi
+
+  flatpak:
+    needs: guard
+    if: needs.guard.outputs.eligible == 'true'
+    uses: ./.github/workflows/flatpak-reusable.yml
+    with:
+      artifact-name: lgx-flatpak-release-${{ github.ref_name }}
+      bundle-name: lgx-${{ github.ref_name }}.flatpak
+      retention-days: 14
+
+  release:
+    name: Draft release from tag
+    needs:
+      - guard
+      - flatpak
+    if: needs.guard.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        env:
+          CURRENT_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          previous_tag="$(git tag --sort=-version:refname | grep -E '^v[0-9]' | grep -Fxv "$CURRENT_TAG" | head -n1 || true)"
+          if [ -n "$previous_tag" ]; then
+            commit_range="${previous_tag}..${CURRENT_TAG}"
+            compare_url="https://github.com/${REPOSITORY}/compare/${previous_tag}...${CURRENT_TAG}"
+            intro="Changes since \`${previous_tag}\`."
+          else
+            commit_range="${CURRENT_TAG}"
+            compare_url=""
+            intro="Initial release."
+          fi
+
+          commits="$(git log --reverse --no-merges --pretty=format:'- %s (%h)' "$commit_range" || true)"
+          if [ -z "$commits" ]; then
+            commits="- No commits found in range."
+          fi
+
+          {
+            echo "# ${CURRENT_TAG}"
+            echo
+            echo "_Draft release notes generated from commit history. Edit before publishing._"
+            echo
+            echo "${intro}"
+            if [ -n "$compare_url" ]; then
+              echo
+              echo "Compare: ${compare_url}"
+            fi
+            echo
+            echo "## Commits"
+            echo
+            printf '%s\n' "$commits"
+          } > release-notes.md
+
+      - name: Download Flatpak bundle
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ needs.flatpak.outputs.artifact-name }}
+          path: dist
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$CURRENT_TAG" >/dev/null 2>&1; then
+            gh release edit "$CURRENT_TAG" \
+              --title "$CURRENT_TAG" \
+              --draft=true \
+              --notes-file release-notes.md
+          else
+            gh release create "$CURRENT_TAG" \
+              --draft \
+              --verify-tag \
+              --title "$CURRENT_TAG" \
+              --notes-file release-notes.md
+          fi
+
+      - name: Upload Flatpak to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$CURRENT_TAG" "dist/${{ needs.flatpak.outputs.bundle-name }}" --clobber
