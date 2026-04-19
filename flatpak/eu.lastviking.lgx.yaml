@@ -76,7 +76,7 @@ modules:
       - install -Dm755 _build/bin/lgx /app/bin/lgx
       - install -Dm644 images/lgxicon.svg /app/share/icons/hicolor/scalable/apps/eu.lastviking.lgx.svg
       - install -Dm644 flatpak/eu.lastviking.lgx.desktop /app/share/applications/eu.lastviking.lgx.desktop
-      - install -Dm644 flatpak/eu.lastviking.lgx.metainfo.xml /app/share/metainfo/eu.lastviking.lgx.metainfo.xml
+      - install -Dm644 _build/flatpak/eu.lastviking.lgx.metainfo.xml /app/share/metainfo/eu.lastviking.lgx.metainfo.xml
     sources:
       # Main LGX source tree
       - type: dir
