@@ -118,26 +118,40 @@ jobs:
           CURRENT_TAG: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          release_id="$(gh api "repos/${REPOSITORY}/releases" --jq ".[] | select(.tag_name == \"${CURRENT_TAG}\") | .id" | head -n1 || true)"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "tag_name": os.environ["CURRENT_TAG"],
+              "target_commitish": os.environ["GITHUB_SHA"],
+              "name": os.environ["CURRENT_TAG"],
+              "draft": True,
+              "body": Path("release-notes.md").read_text(),
+          }
+          Path("release-payload.json").write_text(json.dumps(payload))
+          PY
+
+          release_id="$(gh api "repos/${REPOSITORY}/releases" --jq ".[] | select(.tag_name == \"${CURRENT_TAG}\" or .name == \"${CURRENT_TAG}\") | .id" | head -n1 || true)"
           if [ -n "${release_id}" ]; then
-            gh api \
+            release_id="$(gh api \
               --method PATCH \
               "repos/${REPOSITORY}/releases/${release_id}" \
-              -f tag_name="${CURRENT_TAG}" \
-              -f target_commitish="${GITHUB_SHA}" \
-              -f name="${CURRENT_TAG}" \
-              -F draft=true \
-              -f body="$(cat release-notes.md)"
+              --input release-payload.json \
+              --jq '.id')"
           else
             release_id="$(gh api \
               --method POST \
               "repos/${REPOSITORY}/releases" \
-              -f tag_name="${CURRENT_TAG}" \
-              -f target_commitish="${GITHUB_SHA}" \
-              -f name="${CURRENT_TAG}" \
-              -F draft=true \
-              -f body="$(cat release-notes.md)" \
+              --input release-payload.json \
               --jq '.id')"
+          fi
+          resolved_tag="$(gh api "repos/${REPOSITORY}/releases/${release_id}" --jq '.tag_name')"
+          if [ "${resolved_tag}" != "${CURRENT_TAG}" ]; then
+            echo "Release ${release_id} resolved to unexpected tag '${resolved_tag}' (expected '${CURRENT_TAG}')." >&2
+            gh api "repos/${REPOSITORY}/releases/${release_id}" >&2 || true
+            exit 1
           fi
           echo "id=${release_id}" >> "$GITHUB_OUTPUT"
 
