@@ -246,7 +246,7 @@ flatpak install --user ./lgx-v0.2.5.flatpak
 On most distributions, it will be available from the start menu under `Development`. 
 If you just installed the flatpak runtime, you might have to log out and back in.
 
-You can also riun it directly from the shell:
+You can also run it directly from the shell:
 
 ```sh
 flatpak run eu.lastviking.lgx
