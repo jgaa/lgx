@@ -261,3 +261,10 @@ flatpak install --user ./lgx-v0.2.6.flatpak
 ## Status
 
 **Beta**
+
+## Blog posts about lgx
+
+- [On lastviking.eu](https://lastviking.eu/tags/lgx.html)
+
+*Add an issue if you want a link to your own blog post about lgx or related content*. 
+
